@@ -20,8 +20,12 @@ enum Prefs {
         get { min(2, max(0, d.integer(forKey: "sensitivity"))) }
         set { d.set(min(2, max(0, newValue)), forKey: "sensitivity") }
     }
-    /// Depth (fraction of standing hip-height) below which a rep's "down" begins.
-    /// Easy counts shallow dips; Strict requires a deep squat.
+    /// How deep a squat must go to count, as a fraction of the user's own standing
+    /// height (the prominence gate in SquatCounter). Easy counts a shallow-but-real
+    /// dip; Strict requires a deep squat. Higher = must go deeper.
+    static var sensitivityMinPromFrac: Double { [0.16, 0.24, 0.32][sensitivity] }
+    /// HUD visual guide only: a rough depth mark to aim the on-screen bar below.
+    /// (Counting itself is relative to standing, not this absolute value.)
     static var sensitivityDownEnter: Double { [0.70, 0.62, 0.54][sensitivity] }
     static var sensitivityLabel: String { ["Easy", "Normal", "Strict"][sensitivity] }
 

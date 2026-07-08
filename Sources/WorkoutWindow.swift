@@ -154,7 +154,7 @@ struct WorkoutHUD: View {
         if !state.bodyVisible { return "Step into the camera's view." }
         if !state.legsVisible { return "Move back until your hips and knees (your thighs) are in frame." }
         switch state.phase {
-        case .down: return "Good depth — now stand all the way up"
+        case .down: return "Good depth — now stand back up"
         case .descending: return "Keep going down…"
         case .standing: return "Squat down"
         }

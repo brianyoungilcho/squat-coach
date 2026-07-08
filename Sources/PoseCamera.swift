@@ -55,8 +55,9 @@ final class PoseCamera: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     func resetCount() { queue.async { self.resetAll() } }
 
     private func resetAll() {
-        counter.config.downEnter = Prefs.sensitivityDownEnter
-        counter.config.upEnter = min(0.90, Prefs.sensitivityDownEnter + 0.18)
+        // Sensitivity controls "how deep counts" (prominence), NOT an absolute up-gate
+        // — counting is relative to the user's own standing height (see SquatCounter).
+        counter.config.minPromFrac = Prefs.sensitivityMinPromFrac
         counter.reset()
         h0 = 0; calibrated = false; warmup = 0
         PoseCamera.startLog()
