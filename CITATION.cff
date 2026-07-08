@@ -1,0 +1,16 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using the metadata from this file."
+title: "Squat Coach"
+type: software
+authors:
+  - family-names: "Cho"
+    given-names: "Brian"
+repository-code: "https://github.com/brianyoungilcho/squat-coach"
+url: "https://github.com/brianyoungilcho/squat-coach"
+license: MIT
+keywords:
+  - macos
+  - menu-bar
+  - fitness
+  - computer-vision
+  - squats
