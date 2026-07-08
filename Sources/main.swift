@@ -30,6 +30,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         workout.onFinished = { [weak self] _ in self?.refreshStatusTooltip() }
         scheduler.onFire = { [weak self] in self?.fireReminder() }
         scheduler.start()
+        refreshStatusTooltip()   // now that nextFire is known
 
         // `kill -USR1 <pid>` triggers a reminder immediately — handy for a
         // "remind me now" script and for driving the app during testing.
@@ -72,8 +73,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func refreshStatusTooltip() {
+        // Absolute clock time in the tooltip so it never goes stale between hovers.
+        let next = scheduler.nextFire.map { "next set \(clockString($0))" } ?? "no reminder set"
         statusItem?.button?.toolTip =
-            "Squat Coach — 🔥 \(Prefs.currentStreak)-day streak · \(Prefs.setsToday) set(s) today"
+            "Squat Coach — \(next) · 🔥 \(Prefs.currentStreak)-day streak · \(Prefs.setsToday) today"
+    }
+
+    // MARK: - Schedule readout
+
+    /// Live "when's the next set / how long since the last" line (fresh each menu open).
+    private func scheduleLine() -> String {
+        let next = scheduler.nextFire.map { "Next set \(untilString($0))" } ?? "Next set —"
+        let last = Prefs.lastSetAt.map { "last \(agoString($0))" } ?? "no set yet"
+        return "⏱ \(next) · \(last)"
+    }
+
+    private func untilString(_ date: Date) -> String {
+        let s = date.timeIntervalSinceNow
+        if s <= 30 { return "now" }
+        let m = Int((s / 60).rounded())
+        if m < 1 { return "in <1 min" }
+        if m < 60 { return "in \(m) min" }
+        return "in \(m / 60)h \(m % 60)m"
+    }
+
+    private func agoString(_ date: Date) -> String {
+        let s = -date.timeIntervalSinceNow
+        if s < 60 { return "just now" }
+        let m = Int(s / 60)
+        if m < 60 { return "\(m) min ago" }
+        return "\(m / 60)h \(m % 60)m ago"
+    }
+
+    private func clockString(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.timeStyle = .short
+        return f.string(from: date)
     }
 
     @objc private func statusClicked() { showMenu() }
@@ -82,6 +117,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
         let menu = NSMenu()
         menu.addItem(withTitle: "Do \(Prefs.targetReps) squats now", action: #selector(startNow), keyEquivalent: "s")
+
+        let sched = NSMenuItem(title: scheduleLine(), action: nil, keyEquivalent: "")
+        sched.isEnabled = false
+        menu.addItem(sched)
 
         let streak = NSMenuItem(title: "🔥 \(Prefs.currentStreak)-day streak · \(Prefs.setsToday) today",
                                 action: nil, keyEquivalent: "")

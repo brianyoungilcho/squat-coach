@@ -10,6 +10,9 @@ import AppKit
 final class Scheduler {
     var onFire: (() -> Void)?
 
+    /// When the next reminder will fire (for the menu's "next set in …" line).
+    private(set) var nextFire: Date?
+
     private var timer: Timer?
     private var activity: NSObjectProtocol?
 
@@ -36,6 +39,7 @@ final class Scheduler {
         let startOfHour = Calendar.current.dateInterval(of: .hour, for: now)?.start ?? now
         var fire = startOfHour
         while fire <= now { fire = fire.addingTimeInterval(interval) }
+        nextFire = fire
         let t = Timer(timeInterval: fire.timeIntervalSince(now), repeats: false) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }

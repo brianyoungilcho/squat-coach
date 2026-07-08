@@ -49,6 +49,11 @@ enum Prefs {
         get { d.integer(forKey: "currentStreak") }
         set { d.set(newValue, forKey: "currentStreak") }
     }
+    /// When the last set was completed (nil if never).
+    static var lastSetAt: Date? {
+        get { let t = d.double(forKey: "lastSetAt"); return t > 0 ? Date(timeIntervalSince1970: t) : nil }
+        set { d.set(newValue?.timeIntervalSince1970 ?? 0, forKey: "lastSetAt") }
+    }
     /// Completed sets today (auto-resets when the day rolls over).
     static var setsToday: Int {
         get {
@@ -71,6 +76,7 @@ enum Prefs {
     /// Record a completed set: bump today's count and advance the daily streak.
     static func recordCompletedSet() {
         setsToday += 1
+        lastSetAt = Date()
         let today = dayString(Date())
         guard lastCompletedDay != today else { return }   // streak already counted today
         let cal = Calendar.current
