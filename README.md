@@ -36,9 +36,12 @@ brew install --cask --no-quarantine brianyoungilcho/tap/squat-coach
 ```
 
 `--no-quarantine` because the app is ad-hoc signed, not notarized. Upgrade later
-with `brew upgrade --cask squat-coach`. On first launch, allow **Camera** and
-**Notifications** when macOS asks — pose detection runs entirely on-device; no
-video is recorded, saved, or sent.
+with `brew upgrade --cask squat-coach`, or from inside the app: **Check for
+Updates… → Install and Relaunch** downloads the new version and swaps it in
+place. (In-app updates don't update Homebrew's own bookkeeping — a later
+`brew upgrade` just reinstalls the version you already have, which is harmless.)
+On first launch, allow **Camera** and **Notifications** when macOS asks —
+pose detection runs entirely on-device; no video is recorded, saved, or sent.
 
 ### Prebuilt zip (manual)
 
@@ -127,6 +130,8 @@ Run the counter tests: `./build.sh --test`.
 | `Sources/Prefs.swift` | UserDefaults settings + streak store + per-day history |
 | `Sources/PackLogic.swift` | Pack message/digest/history logic (pure, unit-tested) |
 | `Sources/PackShare.swift` | Fire-and-forget Slack webhook posts (opt-in) |
+| `Sources/UpdaterLogic.swift` | Release parsing + version compare (pure, unit-tested) |
+| `Sources/Updater.swift` | One-click self-update: download, verify, swap, relaunch |
 | `build.sh` / `install.sh` | `swiftc` build + `.app` assembly + ad-hoc sign |
 
 ## Credits
