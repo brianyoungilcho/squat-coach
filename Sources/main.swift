@@ -30,10 +30,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         workout.onFinished = { [weak self] _ in self?.refreshStatusTooltip() }
         scheduler.onFire = { [weak self] in
             PackShare.postDigestIfNeeded()
+            PackSync.shared.refresh()
             self?.fireReminder()
         }
         scheduler.start()
         PackShare.postDigestIfNeeded()   // catch up if we launched after 06:00
+        PackSync.shared.refresh()
         refreshStatusTooltip()   // now that nextFire is known
 
         // `kill -USR1 <pid>` triggers a reminder immediately — handy for a
@@ -131,7 +133,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         streak.isEnabled = false
         menu.addItem(streak)
 
-        if Prefs.packShareEnabled {
+        if PackSync.shared.isActive {
+            // Kick a background refresh; this menu shows the cached state and
+            // the next open shows anything fresher.
+            PackSync.shared.refresh()
+            menu.addItem(.separator())
+            let header = NSMenuItem(title: "🤝 Your pack · \(Prefs.packCode)",
+                                    action: nil, keyEquivalent: "")
+            header.isEnabled = false
+            menu.addItem(header)
+            let summaries = PackSync.shared.summaries
+            if summaries.isEmpty {
+                let empty = NSMenuItem(title: "No pack activity yet — finish a set!",
+                                       action: nil, keyEquivalent: "")
+                empty.isEnabled = false
+                menu.addItem(empty)
+            }
+            for member in summaries.prefix(8) {
+                let row = NSMenuItem(title: PackSyncLogic.menuLine(member, selfId: Prefs.packMemberId),
+                                     action: nil, keyEquivalent: "")
+                row.isEnabled = false
+                menu.addItem(row)
+            }
+        } else if Prefs.packShareEnabled {
             let pack = NSMenuItem(title: "🤝 Pack · sharing as \(Prefs.packResolvedName)",
                                   action: nil, keyEquivalent: "")
             pack.isEnabled = false

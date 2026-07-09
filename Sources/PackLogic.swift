@@ -10,10 +10,10 @@ enum PackLogic {
     /// timezone it saw at first use, which goes stale on a long-running
     /// menu-bar app when the Mac changes timezones.
     static func dayString(_ date: Date) -> String {
-        makeDayFormatter().string(from: date)
+        dayFormatter().string(from: date)
     }
 
-    private static func makeDayFormatter() -> DateFormatter {
+    static func dayFormatter() -> DateFormatter {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd"
         f.locale = Locale(identifier: "en_US_POSIX")
@@ -28,7 +28,7 @@ enum PackLogic {
                               keepDays: Int = 30) -> [String: Int] {
         var out = log
         out[today] = setsToday
-        let formatter = makeDayFormatter()
+        let formatter = dayFormatter()
         guard let todayDate = formatter.date(from: today),
               let cutoff = Calendar.current.date(byAdding: .day, value: -(keepDays - 1), to: todayDate)
         else { return out }

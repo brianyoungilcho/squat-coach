@@ -119,4 +119,38 @@ enum Prefs {
         get { d.string(forKey: "lastDigestDay") ?? "" }
         set { d.set(newValue, forKey: "lastDigestDay") }
     }
+
+    // MARK: - Pack sync (shared backend; see supabase/schema.sql)
+
+    /// The shared secret that names your pack, e.g. "SQT-BROS". Empty = no sync.
+    static var packCode: String {
+        get { d.string(forKey: "packCode") ?? "" }
+        set { d.set(newValue, forKey: "packCode") }
+    }
+    /// Stable per-install identity, minted on first use — display names can
+    /// change or collide; this can't.
+    static var packMemberId: String {
+        if let existing = d.string(forKey: "packMemberId") { return existing }
+        let fresh = UUID().uuidString.lowercased()
+        d.set(fresh, forKey: "packMemberId")
+        return fresh
+    }
+    /// Backend overrides for self-hosters (README); empty = the shipped project.
+    static var packBackendURL: String {
+        let s = d.string(forKey: "packBackendURL") ?? ""
+        return s.isEmpty ? PackSyncLogic.defaultBaseURL : s
+    }
+    static var packBackendKey: String {
+        let s = d.string(forKey: "packBackendKey") ?? ""
+        return s.isEmpty ? PackSyncLogic.defaultKey : s
+    }
+    /// Last-seen today-counts per member (for friend-finished notifications).
+    static var packSnapshotDay: String {
+        get { d.string(forKey: "packSnapshotDay") ?? "" }
+        set { d.set(newValue, forKey: "packSnapshotDay") }
+    }
+    static var packSnapshot: [String: Int] {
+        get { (d.dictionary(forKey: "packSnapshot") ?? [:]).compactMapValues { $0 as? Int } }
+        set { d.set(newValue, forKey: "packSnapshot") }
+    }
 }

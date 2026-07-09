@@ -280,6 +280,7 @@ final class WorkoutController: NSObject {
         if success {
             Prefs.recordCompletedSet()
             PackShare.postSetCompleted(reps: state.reps)
+            PackSync.shared.pushToday()
         }
         onFinished?(success)
         window?.close()          // → willClose → handleClosed()

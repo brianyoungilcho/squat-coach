@@ -10,7 +10,7 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 BUILD="$ROOT/.build"
 BIN_NAME="SquatCoach"
 APP="${SQUAT_COACH_APP:-/Applications/Squat Coach.app}"
-VERSION="${SQUAT_COACH_VERSION:-0.3.0}"
+VERSION="${SQUAT_COACH_VERSION:-0.4.0}"
 HOST_ARCH="$(uname -m)"   # arm64 on Apple Silicon — used for the test build only
 
 FRAMEWORKS=(-framework AppKit -framework SwiftUI -framework AVFoundation -framework Vision
@@ -41,6 +41,14 @@ if [[ "${1:-}" == "--test" ]]; then
     -o "$BUILD/updatertests" \
     "$ROOT/Sources/UpdaterLogic.swift" "$BUILD/updater-tests/main.swift"
   "$BUILD/updatertests"
+
+  echo "==> Building + running PackSyncLogic tests"
+  mkdir -p "$BUILD/packsync-tests"
+  cp "$ROOT/Tests/PackSyncLogicTests.swift" "$BUILD/packsync-tests/main.swift"
+  swiftc -swift-version 5 -target "${HOST_ARCH}-apple-macos13.0" \
+    -o "$BUILD/packsynctests" \
+    "$ROOT/Sources/PackLogic.swift" "$ROOT/Sources/PackSyncLogic.swift" "$BUILD/packsync-tests/main.swift"
+  "$BUILD/packsynctests"
   exit $?
 fi
 

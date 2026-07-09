@@ -12,6 +12,7 @@ struct SettingsView: View {
     @State private var soundEnabled = Prefs.soundEnabled
     @State private var launchAtLogin = (SMAppService.mainApp.status == .enabled)
     @State private var packShareEnabled = Prefs.packShareEnabled
+    @State private var packCode = Prefs.packCode
     @State private var packWebhookURL = Prefs.packWebhookURL
     @State private var packDisplayName = Prefs.packDisplayName
 
@@ -39,12 +40,15 @@ struct SettingsView: View {
                 Toggle("Launch at login", isOn: $launchAtLogin)
             }
             Section {
-                Toggle("Share finished sets to Slack", isOn: $packShareEnabled)
-                TextField("Webhook URL", text: $packWebhookURL,
-                          prompt: Text("https://hooks.slack.com/services/…"))
+                Toggle("Share finished sets with your pack", isOn: $packShareEnabled)
+                TextField("Pack code", text: $packCode,
+                          prompt: Text("e.g. SQT-BROS — same code as your friends"))
                     .autocorrectionDisabled()
                 TextField("Display name", text: $packDisplayName,
                           prompt: Text(NSFullUserName()))
+                TextField("Slack webhook (optional)", text: $packWebhookURL,
+                          prompt: Text("https://hooks.slack.com/services/…"))
+                    .autocorrectionDisabled()
                 Button("Send a test post") { PackShare.postTest() }
                     .disabled(!packShareEnabled ||
                               !packWebhookURL.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -52,7 +56,7 @@ struct SettingsView: View {
             } header: {
                 Text("Pack")
             } footer: {
-                Text("Posts only your name, finished sets, and streak to your pack's Slack channel — video never leaves your Mac. Webhook setup takes ~2 minutes; see the README.")
+                Text("Everyone with the same pack code (4+ characters, case doesn't matter) sees each other in the menu and gets a nudge when someone finishes a set. Shares only a random install id, your name, set counts, and streak — video never leaves your Mac. The Slack webhook additionally posts each set to a channel; see the README for both setups.")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -78,6 +82,10 @@ struct SettingsView: View {
             // Arm the digest for tomorrow — enabling at 8 PM shouldn't post a
             // "yesterday" recap that same evening.
             if v { Prefs.lastDigestDay = Prefs.dayString(Date()) }
+        }
+        .onChange(of: packCode) { v in
+            Prefs.packCode = PackSyncLogic.normalizedPackCode(v)
+            PackSync.shared.packChanged()
         }
         .onChange(of: packWebhookURL) { v in
             Prefs.packWebhookURL = v.trimmingCharacters(in: .whitespacesAndNewlines)

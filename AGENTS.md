@@ -36,9 +36,13 @@ Apple's on-device Vision framework.
 
 - The camera feed is processed entirely on-device by Vision; **no video is ever
   recorded, saved, or transmitted**. Don't add any network/upload path for frames.
-- Pack sharing (Settings → Pack) is **opt-in, off by default**, and posts only the
-  display name, squat/set counts, and streak to a user-supplied Slack webhook. Keep
-  it that way: never widen what it sends, and never send frames or pose data anywhere.
+- Pack sharing (Settings → Pack) is **opt-in, off by default**, and sends only the
+  display name, squat/set counts, and streak — to the shared pack backend (Supabase,
+  schema in supabase/schema.sql, keyed by pack code) and/or a user-supplied Slack
+  webhook. Keep it that way: never widen what it sends, and never send frames or
+  pose data anywhere. The publishable API key in PackSyncLogic.swift is public by
+  design (RLS is the boundary); the project's secret key must never appear in this
+  repo or the app.
 - Don't disable Gatekeeper globally or change security settings; the
   source-build path needs no Gatekeeper workarounds at all.
 - The app is ad-hoc signed (not notarized) — that's intentional. The prebuilt

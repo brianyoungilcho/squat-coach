@@ -1,0 +1,26 @@
+name: Pack backend keep-alive
+
+# Free Supabase projects pause after ~7 days without database queries. Packs
+# in daily use keep the project alive on their own; this twice-weekly read
+# covers vacation weeks. The key below is the app's *publishable* key — it
+# ships in the app binary and is public by design (RLS is the boundary).
+on:
+  schedule:
+    - cron: "17 9 * * 1,4"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      # Runs a real query through pack_fetch (counts as database activity).
+      # Goes red until supabase/schema.sql has been applied to the project —
+      # after that, red means the backend is genuinely down or paused.
+      - name: Query the pack backend
+        run: |
+          curl -sf -X POST "https://dpkyrftbxuhwwwtaftga.supabase.co/rest/v1/rpc/pack_fetch" \
+            -H "apikey: sb_publishable_xF8Tsxl_TQU04C6ArgRvvw_TFZQ1GUZ" \
+            -H "Authorization: Bearer sb_publishable_xF8Tsxl_TQU04C6ArgRvvw_TFZQ1GUZ" \
+            -H "Content-Type: application/json" \
+            -d '{"p_code":"KEEPALIVE-PING","p_since":"2026-01-01"}' >/dev/null
+          echo "backend pinged"
