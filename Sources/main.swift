@@ -207,48 +207,96 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         win.makeKeyAndOrderFront(nil); win.orderFrontRegardless()
     }
 
-    // MARK: - Update check (plain GitHub Releases — no Sparkle; mirrors Claude Dash)
+    // MARK: - Update check + one-click install (GitHub Releases — no Sparkle)
+
+    /// One update flow at a time — the check is reachable from both the menu
+    /// and Settings, and two concurrent installs would race the bundle swap.
+    private var updateInFlight = false
 
     @objc private func checkForUpdates() {
-        let current = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
+        guard !updateInFlight else { return }
+        updateInFlight = true
         var req = URLRequest(url: URL(string: "https://api.github.com/repos/brianyoungilcho/squat-coach/releases/latest")!)
         req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         URLSession.shared.dataTask(with: req) { data, _, _ in
-            var latest: String?, url: String?
-            if let data, let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                latest = (obj["tag_name"] as? String)?.trimmingCharacters(in: CharacterSet(charactersIn: "v"))
-                url = obj["html_url"] as? String
-            }
-            DispatchQueue.main.async {
-                NSApp.setActivationPolicy(.regular); NSApp.activate(ignoringOtherApps: true)
-                let alert = NSAlert()
-                if let latest {
-                    let upToDate = latest.compare(current, options: .numeric) != .orderedDescending
-                    alert.messageText = upToDate ? "You're up to date" : "Update available: v\(latest)"
-                    alert.informativeText = upToDate
-                        ? "Squat Coach v\(current) is the latest release."
-                        : "You have v\(current). Download v\(latest) from GitHub, or run git pull && ./install.sh."
-                    alert.addButton(withTitle: upToDate ? "OK" : "Open Releases")
-                    if !upToDate { alert.addButton(withTitle: "Later") }
-                    if alert.runModal() == .alertFirstButtonReturn, !upToDate, let url, let u = URL(string: url) {
-                        NSWorkspace.shared.open(u)
-                    }
-                } else {
-                    alert.messageText = "Couldn't check for updates"
-                    alert.informativeText = "GitHub wasn't reachable. Try again later."
-                    alert.runModal()
-                }
-                NSApp.setActivationPolicy(.accessory)
-            }
+            let release = data.flatMap(UpdaterLogic.parseRelease)
+            DispatchQueue.main.async { MainActor.assumeIsolated { self.presentUpdateAlert(release) } }
         }.resume()
     }
 
-    /// Bring the accessory app forward for a modal, then demote it again.
+    private func presentUpdateAlert(_ release: UpdaterLogic.Release?) {
+        let current = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
+        var install = false
+        withRegularActivation {
+            let alert = NSAlert()
+            guard let release else {
+                alert.messageText = "Couldn't check for updates"
+                alert.informativeText = "GitHub wasn't reachable. Try again later."
+                alert.runModal()
+                return
+            }
+            guard UpdaterLogic.isNewer(latest: release.version, current: current) else {
+                alert.messageText = "You're up to date"
+                alert.informativeText = "Squat Coach v\(current) is the latest release."
+                alert.addButton(withTitle: "OK")
+                alert.runModal()
+                return
+            }
+            alert.messageText = "Update available: v\(release.version)"
+            alert.informativeText = "You have v\(current). Squat Coach can download v\(release.version), "
+                + "install it, and relaunch itself."
+            alert.addButton(withTitle: "Install and Relaunch")
+            alert.addButton(withTitle: "View on GitHub")
+            alert.addButton(withTitle: "Later")
+            switch alert.runModal() {
+            case .alertFirstButtonReturn: install = true
+            case .alertSecondButtonReturn:
+                if let u = URL(string: release.pageURL) { NSWorkspace.shared.open(u) }
+            default: break
+            }
+        }
+        if install, let release { startInstall(release) } else { updateInFlight = false }
+    }
+
+    private func startInstall(_ release: UpdaterLogic.Release) {
+        guard let zip = URL(string: release.zipURL), UpdaterLogic.isTrustedDownloadURL(zip) else {
+            updateInFlight = false
+            return
+        }
+        statusItem?.button?.toolTip = "Squat Coach — downloading v\(release.version)…"
+        Updater.install(zipURL: zip, expectedVersion: release.version,
+                        appPath: Bundle.main.bundlePath) { [weak self] error in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                guard let error else {
+                    Updater.relaunch(appPath: Bundle.main.bundlePath)
+                    return
+                }
+                self.updateInFlight = false
+                self.refreshStatusTooltip()
+                self.withRegularActivation {
+                    let a = NSAlert()
+                    a.messageText = "Update failed"
+                    a.informativeText = error.localizedDescription
+                        + " You can update manually from the releases page."
+                    a.addButton(withTitle: "OK")                 // default = safe dismiss
+                    a.addButton(withTitle: "Open Releases")
+                    if a.runModal() == .alertSecondButtonReturn, let u = URL(string: release.pageURL) {
+                        NSWorkspace.shared.open(u)
+                    }
+                }
+            }
+        }
+    }
+
+    /// Bring the accessory app forward for a modal, then demote it again —
+    /// unless the Settings window is still open, which owns .regular until it
+    /// closes (its willClose handler does the demotion).
     private func withRegularActivation(_ body: () -> Void) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         body()
-        NSApp.setActivationPolicy(.accessory)
+        if settingsWindow == nil { NSApp.setActivationPolicy(.accessory) }
     }
 
     // MARK: - Reminder

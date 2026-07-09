@@ -60,7 +60,10 @@ Apple's on-device Vision framework.
   `/Applications/Squat Coach.app`; version via `SQUAT_COACH_VERSION` env — CI
   derives it from the git tag). No Xcode.
 - **Tests**: `./build.sh --test` compiles and runs the standalone (non-XCTest)
-  `SquatCounter` and `PackLogic` suites.
+  `SquatCounter`, `PackLogic`, and `UpdaterLogic` suites.
+- **Self-update**: "Check for Updates… → Install and Relaunch" downloads the
+  latest GitHub release zip, verifies the bundle version, swaps it over the
+  running app, and relaunches (Sources/Updater.swift — no Sparkle).
 - **Release**: push a `vX.Y.Z` tag → `.github/workflows/release.yml` builds,
   zips, publishes a GitHub release, and bumps the Homebrew tap cask.
 - **Files**: `Sources/main.swift` (delegate, menu, scheduler, settings, updates),

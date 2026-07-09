@@ -33,8 +33,10 @@ need to see your feet.
 No. Pose detection runs entirely on-device via Apple's Vision framework. No
 frame is recorded, saved to disk, or sent anywhere — Squat Coach makes no
 network requests for video, and needs no account or internet to count squats.
-(The only network call in the app is an optional "Check for Updates" that reads
-the public GitHub releases list.)
+The app's only network calls are: "Check for Updates" (reads the public GitHub
+releases list, and — only if you click **Install and Relaunch** — downloads the
+new release zip from GitHub), and the opt-in Pack sharing (posts your display
+name, set counts, and streak; off by default).
 
 **How do I change how often it reminds me, or how many squats?**
 Right-click the menu-bar icon → **Settings…** — set the interval (30 min – 2 hr),
