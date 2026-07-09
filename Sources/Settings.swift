@@ -11,6 +11,9 @@ struct SettingsView: View {
     @State private var sensitivity = Prefs.sensitivity
     @State private var soundEnabled = Prefs.soundEnabled
     @State private var launchAtLogin = (SMAppService.mainApp.status == .enabled)
+    @State private var packShareEnabled = Prefs.packShareEnabled
+    @State private var packWebhookURL = Prefs.packWebhookURL
+    @State private var packDisplayName = Prefs.packDisplayName
 
     var body: some View {
         Form {
@@ -36,6 +39,24 @@ struct SettingsView: View {
                 Toggle("Launch at login", isOn: $launchAtLogin)
             }
             Section {
+                Toggle("Share finished sets to Slack", isOn: $packShareEnabled)
+                TextField("Webhook URL", text: $packWebhookURL,
+                          prompt: Text("https://hooks.slack.com/services/…"))
+                    .autocorrectionDisabled()
+                TextField("Display name", text: $packDisplayName,
+                          prompt: Text(NSFullUserName()))
+                Button("Send a test post") { PackShare.postTest() }
+                    .disabled(!packShareEnabled ||
+                              !packWebhookURL.trimmingCharacters(in: .whitespacesAndNewlines)
+                                  .hasPrefix("https://"))
+            } header: {
+                Text("Pack")
+            } footer: {
+                Text("Posts only your name, finished sets, and streak to your pack's Slack channel — video never leaves your Mac. Webhook setup takes ~2 minutes; see the README.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            Section {
                 Button("Check for Updates…", action: onCheckUpdates)
             }
         }
@@ -52,5 +73,15 @@ struct SettingsView: View {
                 else { try SMAppService.mainApp.unregister() }
             } catch { /* non-fatal */ }
         }
+        .onChange(of: packShareEnabled) { v in
+            Prefs.packShareEnabled = v
+            // Arm the digest for tomorrow — enabling at 8 PM shouldn't post a
+            // "yesterday" recap that same evening.
+            if v { Prefs.lastDigestDay = Prefs.dayString(Date()) }
+        }
+        .onChange(of: packWebhookURL) { v in
+            Prefs.packWebhookURL = v.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        .onChange(of: packDisplayName) { v in Prefs.packDisplayName = v }
     }
 }

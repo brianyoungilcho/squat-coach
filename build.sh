@@ -9,8 +9,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 BUILD="$ROOT/.build"
 BIN_NAME="SquatCoach"
-APP="/Applications/Squat Coach.app"
-VERSION="${SQUAT_COACH_VERSION:-0.1.1}"
+APP="${SQUAT_COACH_APP:-/Applications/Squat Coach.app}"
+VERSION="${SQUAT_COACH_VERSION:-0.2.0}"
 HOST_ARCH="$(uname -m)"   # arm64 on Apple Silicon — used for the test build only
 
 FRAMEWORKS=(-framework AppKit -framework SwiftUI -framework AVFoundation -framework Vision
@@ -19,13 +19,20 @@ FRAMEWORKS=(-framework AppKit -framework SwiftUI -framework AVFoundation -framew
 
 if [[ "${1:-}" == "--test" ]]; then
   echo "==> Building + running SquatCounter tests"
-  mkdir -p "$BUILD"
+  mkdir -p "$BUILD/counter-tests" "$BUILD/pack-tests"
   # Top-level test code is only allowed in a file named main.swift, so stage it.
-  cp "$ROOT/Tests/SquatCounterTests.swift" "$BUILD/main.swift"
+  cp "$ROOT/Tests/SquatCounterTests.swift" "$BUILD/counter-tests/main.swift"
   swiftc -swift-version 5 -target "${HOST_ARCH}-apple-macos13.0" \
     -o "$BUILD/squattests" \
-    "$ROOT/Sources/SquatCounter.swift" "$BUILD/main.swift"
+    "$ROOT/Sources/SquatCounter.swift" "$BUILD/counter-tests/main.swift"
   "$BUILD/squattests"
+
+  echo "==> Building + running PackLogic tests"
+  cp "$ROOT/Tests/PackLogicTests.swift" "$BUILD/pack-tests/main.swift"
+  swiftc -swift-version 5 -target "${HOST_ARCH}-apple-macos13.0" \
+    -o "$BUILD/packtests" \
+    "$ROOT/Sources/PackLogic.swift" "$BUILD/pack-tests/main.swift"
+  "$BUILD/packtests"
   exit $?
 fi
 

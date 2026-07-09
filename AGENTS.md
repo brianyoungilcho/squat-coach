@@ -36,6 +36,9 @@ Apple's on-device Vision framework.
 
 - The camera feed is processed entirely on-device by Vision; **no video is ever
   recorded, saved, or transmitted**. Don't add any network/upload path for frames.
+- Pack sharing (Settings → Pack) is **opt-in, off by default**, and posts only the
+  display name, squat/set counts, and streak to a user-supplied Slack webhook. Keep
+  it that way: never widen what it sends, and never send frames or pose data anywhere.
 - Don't disable Gatekeeper globally or change security settings; the
   source-build path needs no Gatekeeper workarounds at all.
 - The app is ad-hoc signed (not notarized) — that's intentional. The prebuilt
@@ -57,7 +60,7 @@ Apple's on-device Vision framework.
   `/Applications/Squat Coach.app`; version via `SQUAT_COACH_VERSION` env — CI
   derives it from the git tag). No Xcode.
 - **Tests**: `./build.sh --test` compiles and runs the standalone (non-XCTest)
-  `SquatCounter` suite.
+  `SquatCounter` and `PackLogic` suites.
 - **Release**: push a `vX.Y.Z` tag → `.github/workflows/release.yml` builds,
   zips, publishes a GitHub release, and bumps the Homebrew tap cask.
 - **Files**: `Sources/main.swift` (delegate, menu, scheduler, settings, updates),

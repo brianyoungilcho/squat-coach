@@ -277,7 +277,10 @@ final class WorkoutController: NSObject {
     private func complete(success: Bool) {
         guard !finished else { return }
         finished = true
-        if success { Prefs.recordCompletedSet() }
+        if success {
+            Prefs.recordCompletedSet()
+            PackShare.postSetCompleted(reps: state.reps)
+        }
         onFinished?(success)
         window?.close()          // → willClose → handleClosed()
     }

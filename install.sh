@@ -12,13 +12,14 @@ if ! xcode-select -p >/dev/null 2>&1; then
 fi
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
+APP="${SQUAT_COACH_APP:-/Applications/Squat Coach.app}"
 "$ROOT/build.sh"
 
 # Restart any running instance so the new build takes over.
 osascript -e 'quit app "Squat Coach"' 2>/dev/null || true
 sleep 1
 pkill -f "Squat Coach.app/Contents/MacOS/SquatCoach" 2>/dev/null && sleep 1 || true
-open "/Applications/Squat Coach.app"
+open "$APP"
 
 echo
 echo "Squat Coach is running — look for the 🏋️ figure icon in your menu bar."
