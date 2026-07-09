@@ -71,27 +71,42 @@ item. Re-run `./install.sh` after any edit to rebuild and relaunch.
 
 ## Pack — squat with friends (optional)
 
-Invite friends or colleagues into a shared Slack channel and every finished set
-posts a one-liner ("🏋️ Brian finished a set — 30 squats · 2 sets today · 🔥
-12-day streak"), plus a short morning recap of yesterday. Everyone sees everyone
+Agree on a pack code with your friends and everyone with that code shows up in
+each other's menu — sets today, the last five days as pacing dots, streaks —
+plus a Mac notification when a packmate finishes a set. Everyone sees everyone
 pacing; nobody has to ask. Off by default.
 
-**Setup (one person, ~2 minutes):**
+**Setup (~1 minute each):** menu-bar icon → **Settings…** → **Pack** → toggle
+on, type the same pack code as your friends (anything ≥ 4 characters, e.g.
+`SQT-BROS`), pick a display name. Done — finish a set and you'll appear in
+everyone's menu.
 
-1. Create the channel (e.g. `#squat-pack`) and invite the pack.
-2. Create the webhook at [api.slack.com/apps](https://api.slack.com/apps) →
-   **Create New App** → *From scratch* → name it "Squat Coach", pick your
-   workspace → **Incoming Webhooks** → toggle **On** → **Add New Webhook to
-   Workspace** → choose the channel → copy the `https://hooks.slack.com/…` URL.
-3. Share that URL with the pack (treat it like a house key — anyone holding it
-   can post to the channel; don't commit it anywhere public).
+**Optional Slack layer:** every finished set can also post a one-liner
+("🏋️ Brian finished a set — 30 squats · 2 sets today · 🔥 12-day streak") plus
+a short morning recap of yesterday into a channel. One person creates the
+webhook at [api.slack.com/apps](https://api.slack.com/apps) → **Create New
+App** → *From scratch* → **Incoming Webhooks** → **On** → **Add New Webhook to
+Workspace** → pick the channel → share the `https://hooks.slack.com/…` URL with
+the pack (treat it like a house key). Each member pastes it in Settings and hits
+**Send a test post**.
 
-**Each member:** menu-bar icon → **Settings…** → **Pack** → toggle on, paste the
-webhook URL, pick a display name, then **Send a test post** and check the channel.
+**Privacy:** sharing is opt-in and sends only a random install id, your display
+name, your squat and set counts, and your streak. Camera frames and pose data
+never leave your Mac, sharing on or off. Pack state lives in a shared community
+database that only answers for a specific pack code (enforced server-side —
+codes are case-insensitive, 4+ characters). Treat the code as a shared secret:
+anyone who has it sees that pack, so use a nickname if you don't want your name
+in it.
 
-**Privacy:** sharing is opt-in and sends only your display name, your squat and
-set counts, and your streak. Camera frames and pose data never leave your Mac,
-sharing on or off.
+**Self-hosting the pack backend:** the app ships pointed at a community
+[Supabase](https://supabase.com) project (schema + policies in
+[supabase/schema.sql](supabase/schema.sql)). To run your own, create a free
+project, paste that schema into its SQL editor, then point the app at it:
+
+```bash
+defaults write com.squatcoach.app packBackendURL "https://YOURREF.supabase.co"
+defaults write com.squatcoach.app packBackendKey "sb_publishable_YOURKEY"
+```
 
 ## How it counts
 
@@ -130,6 +145,8 @@ Run the counter tests: `./build.sh --test`.
 | `Sources/Prefs.swift` | UserDefaults settings + streak store + per-day history |
 | `Sources/PackLogic.swift` | Pack message/digest/history logic (pure, unit-tested) |
 | `Sources/PackShare.swift` | Fire-and-forget Slack webhook posts (opt-in) |
+| `Sources/PackSyncLogic.swift` | Pack view logic: grouping, pacing dots, diffs (pure, unit-tested) |
+| `Sources/PackSync.swift` | Shared-backend sync: upsert on set, fetch for the menu (opt-in) |
 | `Sources/UpdaterLogic.swift` | Release parsing + version compare (pure, unit-tested) |
 | `Sources/Updater.swift` | One-click self-update: download, verify, swap, relaunch |
 | `build.sh` / `install.sh` | `swiftc` build + `.app` assembly + ad-hoc sign |
