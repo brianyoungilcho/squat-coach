@@ -28,8 +28,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         UNUserNotificationCenter.current().delegate = self
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
         workout.onFinished = { [weak self] _ in self?.refreshStatusTooltip() }
-        scheduler.onFire = { [weak self] in self?.fireReminder() }
+        scheduler.onFire = { [weak self] in
+            PackShare.postDigestIfNeeded()
+            self?.fireReminder()
+        }
         scheduler.start()
+        PackShare.postDigestIfNeeded()   // catch up if we launched after 06:00
         refreshStatusTooltip()   // now that nextFire is known
 
         // `kill -USR1 <pid>` triggers a reminder immediately — handy for a
@@ -126,6 +130,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                 action: nil, keyEquivalent: "")
         streak.isEnabled = false
         menu.addItem(streak)
+
+        if Prefs.packShareEnabled {
+            let pack = NSMenuItem(title: "🤝 Pack · sharing as \(Prefs.packResolvedName)",
+                                  action: nil, keyEquivalent: "")
+            pack.isEnabled = false
+            menu.addItem(pack)
+        }
         menu.addItem(.separator())
 
         menu.addItem(withTitle: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
@@ -155,7 +166,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             a.messageText = "Squat Coach"
             a.informativeText = "Version \(version)\n\n"
                 + "Every \(Prefs.intervalMinutes) minutes, do \(Prefs.targetReps) squats. Your camera counts "
-                + "them on-device with Apple Vision — nothing is recorded or leaves this Mac.\n\n"
+                + "them on-device with Apple Vision — video is never recorded and never leaves this Mac. "
+                + "Pack sharing (optional, off by default) posts only your name, set counts, and streak "
+                + "to your pack's Slack channel.\n\n"
                 + "🔥 \(Prefs.currentStreak)-day streak · \(Prefs.setsToday) set(s) today."
             a.addButton(withTitle: "OK")
             a.addButton(withTitle: "View on GitHub")

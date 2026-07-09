@@ -12,6 +12,7 @@ enum Prefs {
             "targetReps": 30,
             "soundEnabled": true,
             "sensitivity": 1,   // 0 = Easy (shallow), 1 = Normal, 2 = Strict (deep)
+            "packShareEnabled": false,
         ])
     }
 
@@ -70,22 +71,52 @@ enum Prefs {
         }
     }
 
-    static func dayString(_ date: Date) -> String {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd"
-        f.locale = Locale(identifier: "en_US_POSIX")
-        return f.string(from: date)
+    /// Per-day completed-set counts for the last ~30 days (yyyy-MM-dd → sets),
+    /// kept for the pack digest and future history views — setsToday alone
+    /// forgets the count at day rollover.
+    static var dayLog: [String: Int] {
+        get { (d.dictionary(forKey: "dayLog") ?? [:]).compactMapValues { $0 as? Int } }
+        set { d.set(newValue, forKey: "dayLog") }
     }
+
+    static func dayString(_ date: Date) -> String { PackLogic.dayString(date) }
 
     /// Record a completed set: bump today's count and advance the daily streak.
     static func recordCompletedSet() {
         setsToday += 1
         lastSetAt = Date()
         let today = dayString(Date())
+        dayLog = PackLogic.updatedDayLog(dayLog, today: today, setsToday: setsToday)
         guard lastCompletedDay != today else { return }   // streak already counted today
         let cal = Calendar.current
         let yesterday = cal.date(byAdding: .day, value: -1, to: Date()).map(dayString) ?? ""
         currentStreak = (lastCompletedDay == yesterday) ? currentStreak + 1 : 1
         lastCompletedDay = today
+    }
+
+    // MARK: - Pack sharing (opt-in, off by default)
+
+    static var packShareEnabled: Bool {
+        get { d.bool(forKey: "packShareEnabled") }
+        set { d.set(newValue, forKey: "packShareEnabled") }
+    }
+    /// The pack's shared Slack incoming-webhook URL (https://hooks.slack.com/…).
+    static var packWebhookURL: String {
+        get { d.string(forKey: "packWebhookURL") ?? "" }
+        set { d.set(newValue, forKey: "packWebhookURL") }
+    }
+    /// Name shown to the pack; empty means "use the macOS account's full name".
+    static var packDisplayName: String {
+        get { d.string(forKey: "packDisplayName") ?? "" }
+        set { d.set(newValue, forKey: "packDisplayName") }
+    }
+    static var packResolvedName: String {
+        let n = packDisplayName.trimmingCharacters(in: .whitespaces)
+        return n.isEmpty ? NSFullUserName() : n
+    }
+    /// yyyy-MM-dd of the last day a morning digest was posted (or consumed).
+    static var lastDigestDay: String {
+        get { d.string(forKey: "lastDigestDay") ?? "" }
+        set { d.set(newValue, forKey: "lastDigestDay") }
     }
 }

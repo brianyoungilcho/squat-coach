@@ -1,7 +1,8 @@
 # Squat Coach
 
 A tiny macOS menu-bar app that reminds you to do squats every hour and **counts
-them with your webcam** — no Xcode, no third-party libraries, nothing leaves your Mac.
+them with your webcam** — no Xcode, no third-party libraries, and your camera
+never leaves your Mac.
 
 It's the Claude Dash pattern (Swift + `swiftc` + a build script) with an added
 camera → Apple Vision → rep-counter pipeline.
@@ -12,8 +13,11 @@ camera → Apple Vision → rep-counter pipeline.
 - Every hour (configurable), pops a window to the front and posts a notification.
 - Opens your webcam, draws a live skeleton, and counts squats to a target (default 30).
 - Hit the target → logs the set and advances a daily 🔥 streak. **Skip** any time.
-- 100% on-device: Apple's Vision framework does the pose detection locally. No video
-  is recorded, saved, or sent anywhere.
+- **Pack (optional, off by default):** post finished sets to a shared Slack channel
+  so friends can keep each other accountable — see [Pack](#pack--squat-with-friends-optional).
+- 100% on-device counting: Apple's Vision framework does the pose detection locally.
+  No video is recorded, saved, or sent anywhere — with Pack sharing on, only your
+  display name, set counts, and streak are posted.
 
 ## Requirements
 
@@ -62,6 +66,30 @@ item. Re-run `./install.sh` after any edit to rebuild and relaunch.
 - `kill -USR1 $(pgrep -f 'Squat Coach.app/Contents/MacOS/SquatCoach')` triggers a
   reminder immediately (handy for scripting a "remind me now").
 
+## Pack — squat with friends (optional)
+
+Invite friends or colleagues into a shared Slack channel and every finished set
+posts a one-liner ("🏋️ Brian finished a set — 30 squats · 2 sets today · 🔥
+12-day streak"), plus a short morning recap of yesterday. Everyone sees everyone
+pacing; nobody has to ask. Off by default.
+
+**Setup (one person, ~2 minutes):**
+
+1. Create the channel (e.g. `#squat-pack`) and invite the pack.
+2. Create the webhook at [api.slack.com/apps](https://api.slack.com/apps) →
+   **Create New App** → *From scratch* → name it "Squat Coach", pick your
+   workspace → **Incoming Webhooks** → toggle **On** → **Add New Webhook to
+   Workspace** → choose the channel → copy the `https://hooks.slack.com/…` URL.
+3. Share that URL with the pack (treat it like a house key — anyone holding it
+   can post to the channel; don't commit it anywhere public).
+
+**Each member:** menu-bar icon → **Settings…** → **Pack** → toggle on, paste the
+webhook URL, pick a display name, then **Send a test post** and check the channel.
+
+**Privacy:** sharing is opt-in and sends only your display name, your squat and
+set counts, and your streak. Camera frames and pose data never leave your Mac,
+sharing on or off.
+
 ## How it counts
 
 Joints come from Apple's `VNDetectHumanBodyPoseRequest` (on-device). The signal
@@ -96,7 +124,9 @@ Run the counter tests: `./build.sh --test`.
 | `Sources/PoseCamera.swift` | AVFoundation capture → Vision pose → thigh-depth signal |
 | `Sources/SquatCounter.swift` | The rep-counting state machine (pure, unit-tested) |
 | `Sources/WorkoutWindow.swift` | Pop-to-front window, camera preview + skeleton, SwiftUI HUD |
-| `Sources/Prefs.swift` | UserDefaults settings + streak store |
+| `Sources/Prefs.swift` | UserDefaults settings + streak store + per-day history |
+| `Sources/PackLogic.swift` | Pack message/digest/history logic (pure, unit-tested) |
+| `Sources/PackShare.swift` | Fire-and-forget Slack webhook posts (opt-in) |
 | `build.sh` / `install.sh` | `swiftc` build + `.app` assembly + ad-hoc sign |
 
 ## Credits
