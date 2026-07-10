@@ -43,6 +43,11 @@ Apple's on-device Vision framework.
   pose data anywhere. The publishable API key in PackSyncLogic.swift is public by
   design (RLS is the boundary); the project's secret key must never appear in this
   repo or the app.
+- Pack codes are **generated, never user-invented** (Crockford Base32, 15 random
+  chars = 75 bits, "SQT" prefix, canonical form is hyphen-free) — the join endpoint
+  is unthrottled, so entropy is the only guessing defense. Don't lower the length,
+  don't add a "custom code" UI, and keep input normalization decode-lenient
+  (case-fold, strip hyphens/whitespace, O→0, I/L→1 — see PackSyncLogic).
 - Don't disable Gatekeeper globally or change security settings; the
   source-build path needs no Gatekeeper workarounds at all.
 - The app is ad-hoc signed (not notarized) — that's intentional. The prebuilt

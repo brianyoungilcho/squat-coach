@@ -75,16 +75,48 @@ do {
     check(newMember.count == 2, "members not in the snapshot count as 0 → both notify")
 }
 
-// 6. Pack-code normalization + validation mirror the server constraints.
+// 6. Pack-code generation: format, alphabet, entropy sanity, uniqueness.
 do {
-    check(PackSyncLogic.normalizedPackCode("  sqt-bros \n") == "SQT-BROS",
-          "codes are trimmed and uppercased")
-    check(PackSyncLogic.isValidPackCode("SQTS"), "4 chars is valid")
-    check(!PackSyncLogic.isValidPackCode("SQT"), "3 chars is rejected (matches server CHECK)")
+    let code = PackSyncLogic.generatePackCode()
+    check(code.count == 18 && code.hasPrefix("SQT"), "canonical form: SQT + 15 chars → \(code)")
+    let alphabet = Set(PackSyncLogic.codeAlphabet)
+    check(code.dropFirst(3).allSatisfy { alphabet.contains($0) },
+          "body uses only the Crockford alphabet")
+    check(!code.contains("I") && !code.contains("L") && !code.contains("O") && !code.contains("U"),
+          "no I/L/O/U (ambiguity + obscenity exclusions)")
+    check(PackSyncLogic.codeAlphabet.count == 32, "32-symbol alphabet = 5 bits/char (75 bits total)")
+    let sample = Set((0..<1000).map { _ in PackSyncLogic.generatePackCode() })
+    check(sample.count == 1000, "1000 generated codes are all distinct")
+    check(PackSyncLogic.isValidPackCode(code), "generated codes pass validation")
+}
+
+// 7. Decode-lenient normalization (Crockford): case, separators, confusables.
+do {
+    check(PackSyncLogic.normalizedPackCode("  sqt-k7mp2-9wxtv-3rhbd \n") == "SQTK7MP29WXTV3RHBD",
+          "display form normalizes to canonical (case, hyphens, whitespace)")
+    check(PackSyncLogic.normalizedPackCode("SQT KOMP2") == "SQTK0MP2", "O folds to 0")
+    check(PackSyncLogic.normalizedPackCode("sqt-lian1") == "SQT11AN1", "L and I fold to 1")
+    let code = PackSyncLogic.generatePackCode()
+    check(PackSyncLogic.normalizedPackCode(PackSyncLogic.displayPackCode(code)) == code,
+          "normalize(display(code)) round-trips to canonical")
+    check(PackSyncLogic.normalizedPackCode(code) == code, "normalization is idempotent on canonical")
+    check(PackSyncLogic.isValidPackCode("SQTS"), "4 chars is valid (server CHECK lower bound)")
+    check(!PackSyncLogic.isValidPackCode("SQT"), "3 chars is rejected")
     check(!PackSyncLogic.isValidPackCode(String(repeating: "X", count: 41)), "41 chars is rejected")
 }
 
-// 7. RPC request builders: URL shape, body keys, name truncation.
+// 8. Display chunking and the invite message.
+do {
+    check(PackSyncLogic.displayPackCode("SQTK7MP29WXTV3RHBD") == "SQT-K7MP2-9WXTV-3RHBD",
+          "canonical renders as SQT-XXXXX-XXXXX-XXXXX")
+    check(PackSyncLogic.displayPackCode("MY-CUSTOM-CODE") == "MY-CUSTOM-CODE",
+          "non-generated codes pass through untouched")
+    let msg = PackSyncLogic.inviteMessage(code: "SQTK7MP29WXTV3RHBD")
+    check(msg.contains("SQT-K7MP2-9WXTV-3RHBD") && msg.contains("github.com/brianyoungilcho/squat-coach"),
+          "invite carries the display code and an install link")
+}
+
+// 9. RPC request builders: URL shape, body keys, name truncation.
 do {
     let url = PackSyncLogic.rpcURL(base: "https://x.supabase.co", function: "pack_fetch")
     check(url?.absoluteString == "https://x.supabase.co/rest/v1/rpc/pack_fetch",
@@ -101,7 +133,7 @@ do {
     check((obj?["p_name"] as? String)?.count == 40, "display name truncated to the server's 40-char bound")
 }
 
-// 8. Row decoding matches PostgREST's JSON shape (rpc returns the same columns).
+// 10. Row decoding matches PostgREST's JSON shape (rpc returns the same columns).
 do {
     let json = """
     [{"member_id":"abc","display_name":"Yuna","day":"2026-07-09","sets":3,"streak":7}]

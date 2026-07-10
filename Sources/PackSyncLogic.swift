@@ -34,15 +34,64 @@ enum PackSyncLogic {
     }
 
     // MARK: - Pack codes
+    //
+    // Codes are machine-generated bearer secrets, not user-picked names — two
+    // strangers typing the same obvious word must never collide into one pack,
+    // and the join endpoint is effectively unthrottled, so guessing has to be
+    // infeasible on entropy alone. Design (per Crockford Base32 / RFC 8628 /
+    // ULID practice): 15 random chars of the Crockford alphabet = 75 bits,
+    // "SQT" brand prefix (zero entropy), displayed in 5-char hyphen chunks,
+    // decode-lenient on input (case-folded, hyphens/whitespace ignored,
+    // O→0 and I/L→1).
 
-    /// Codes are case-insensitive: normalized to uppercase on save so two
-    /// friends typing "sqt-bros" and "SQT-BROS" land in the same pack.
-    static func normalizedPackCode(_ raw: String) -> String {
-        raw.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+    /// Crockford Base32: no I, L, O (look like 1/0) and no U (accidental
+    /// obscenity). 32 symbols = 5 bits per character.
+    static let codeAlphabet = Array("0123456789ABCDEFGHJKMNPQRSTVWXYZ")
+
+    /// A fresh pack code in canonical (hyphen-free) form, e.g.
+    /// "SQTK7MP29WXTV3RHBD". SystemRandomNumberGenerator is cryptographically
+    /// secure, so 15 alphabet chars = 75 bits against blind guessing.
+    static func generatePackCode() -> String {
+        "SQT" + String((0..<15).map { _ in codeAlphabet.randomElement()! })
     }
 
-    /// Mirrors the server's CHECK constraint so a too-short code fails in the
-    /// UI instead of silently 4xx-ing on every push.
+    /// Decode-lenient normalization for anything typed or pasted: uppercase,
+    /// drop hyphens and whitespace, fold the confusables the alphabet excludes.
+    /// Idempotent over both the canonical and display forms of generated codes.
+    static func normalizedPackCode(_ raw: String) -> String {
+        String(raw.uppercased().compactMap { ch -> Character? in
+            switch ch {
+            case "O": return "0"
+            case "I", "L": return "1"
+            case "-": return nil
+            default: return ch.isWhitespace ? nil : ch
+            }
+        })
+    }
+
+    /// Human form of a generated code: "SQT-K7MP2-9WXTV-3RHBD". Codes that
+    /// aren't ours (self-hosters, custom) pass through untouched.
+    static func displayPackCode(_ code: String) -> String {
+        guard code.count == 18, code.hasPrefix("SQT") else { return code }
+        let body = Array(code.dropFirst(3))
+        return "SQT-" + stride(from: 0, to: body.count, by: 5)
+            .map { String(body[$0..<min($0 + 5, body.count)]) }
+            .joined(separator: "-")
+    }
+
+    /// The message "Copy invite" puts on the clipboard — code plus a way in
+    /// for friends who don't have the app yet.
+    static func inviteMessage(code: String) -> String {
+        """
+        Join my Squat Coach pack 🏋️
+        Pack code: \(displayPackCode(code))
+        Get the app: https://github.com/brianyoungilcho/squat-coach#install
+        Then: menu bar icon → Settings… → Pack → paste the code into “Join”.
+        """
+    }
+
+    /// Mirrors the server's CHECK constraint so a bad code fails in the UI
+    /// instead of silently 4xx-ing on every push.
     static func isValidPackCode(_ code: String) -> Bool {
         (4...40).contains(code.count)
     }

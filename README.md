@@ -71,15 +71,18 @@ item. Re-run `./install.sh` after any edit to rebuild and relaunch.
 
 ## Pack — squat with friends (optional)
 
-Agree on a pack code with your friends and everyone with that code shows up in
-each other's menu — sets today, the last five days as pacing dots, streaks —
-plus a Mac notification when a packmate finishes a set. Everyone sees everyone
-pacing; nobody has to ask. Off by default.
+Start a pack, invite your friends, and everyone shows up in each other's menu —
+sets today, the last five days as pacing dots, streaks — plus a Mac
+notification when a packmate finishes a set. Everyone sees everyone pacing;
+nobody has to ask. Off by default.
 
-**Setup (~1 minute each):** menu-bar icon → **Settings…** → **Pack** → toggle
-on, type the same pack code as your friends (anything ≥ 4 characters, e.g.
-`SQT-BROS`), pick a display name. Done — finish a set and you'll appear in
-everyone's menu.
+**Setup (~1 minute):** menu-bar icon → **Settings…** → **Pack** →
+**Create a pack**. The app generates an unguessable code like
+`SQT-K7MP2-9WXTV-3RHBD` (75 bits of randomness, Crockford Base32 — no
+confusable 0/O or 1/I/l characters). Hit **Copy invite** and send it to your
+friends; they paste it into **Join a pack**. Codes are case-insensitive and
+typo-tolerant (hyphens and spaces are ignored; a stray `O` or `l` is read as
+`0`/`1`), so retyping from a phone screen works too.
 
 **Optional Slack layer:** every finished set can also post a one-liner
 ("🏋️ Brian finished a set — 30 squats · 2 sets today · 🔥 12-day streak") plus
@@ -93,10 +96,10 @@ the pack (treat it like a house key). Each member pastes it in Settings and hits
 **Privacy:** sharing is opt-in and sends only a random install id, your display
 name, your squat and set counts, and your streak. Camera frames and pose data
 never leave your Mac, sharing on or off. Pack state lives in a shared community
-database that only answers for a specific pack code (enforced server-side —
-codes are case-insensitive, 4+ characters). Treat the code as a shared secret:
-anyone who has it sees that pack, so use a nickname if you don't want your name
-in it.
+database that only answers for a specific pack code (enforced server-side).
+Treat the code like a house key: anyone who has it sees that pack, so use a
+nickname if you don't want your name in it, and **Leave pack** + create a new
+one if a code ever leaks beyond your friends.
 
 **Self-hosting the pack backend:** the app ships pointed at a community
 [Supabase](https://supabase.com) project (schema + policies in
