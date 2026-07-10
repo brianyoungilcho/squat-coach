@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import ServiceManagement
 
@@ -13,8 +14,33 @@ struct SettingsView: View {
     @State private var launchAtLogin = (SMAppService.mainApp.status == .enabled)
     @State private var packShareEnabled = Prefs.packShareEnabled
     @State private var packCode = Prefs.packCode
+    @State private var joinCode = ""
+    @State private var inviteCopied = false
     @State private var packWebhookURL = Prefs.packWebhookURL
     @State private var packDisplayName = Prefs.packDisplayName
+
+    private var normalizedJoinCode: String { PackSyncLogic.normalizedPackCode(joinCode) }
+
+    /// The one path every pack membership change goes through. Sharing state
+    /// is persisted BEFORE packChanged() — its forced refresh checks isActive,
+    /// and the .onChange persistence for the toggle only lands after this
+    /// closure returns, which would make the first fetch after joining no-op.
+    private func setPack(_ code: String) {
+        if code.isEmpty {
+            // Leaving is a clean exit: Slack posts stop too, not just sync.
+            Prefs.packShareEnabled = false
+            packShareEnabled = false
+        } else if !Prefs.packShareEnabled {
+            Prefs.packShareEnabled = true
+            Prefs.lastDigestDay = Prefs.dayString(Date())   // digest arms tomorrow
+            packShareEnabled = true
+        }
+        packCode = code
+        Prefs.packCode = code
+        joinCode = ""
+        inviteCopied = false
+        PackSync.shared.packChanged()
+    }
 
     var body: some View {
         Form {
@@ -41,9 +67,43 @@ struct SettingsView: View {
             }
             Section {
                 Toggle("Share finished sets with your pack", isOn: $packShareEnabled)
-                TextField("Pack code", text: $packCode,
-                          prompt: Text("e.g. SQT-BROS — same code as your friends"))
-                    .autocorrectionDisabled()
+                if !PackSyncLogic.isValidPackCode(packCode) {
+                    LabeledContent("Start a pack") {
+                        Button("Create a pack") { setPack(PackSyncLogic.generatePackCode()) }
+                    }
+                    LabeledContent("Join a pack") {
+                        HStack {
+                            TextField("", text: $joinCode,
+                                      prompt: Text("paste an invite code"))
+                                .autocorrectionDisabled()
+                                .onSubmit { joinIfValid() }
+                            Button("Join") { joinIfValid() }
+                                .disabled(!PackSyncLogic.isGeneratedCode(normalizedJoinCode))
+                        }
+                    }
+                } else {
+                    LabeledContent("Pack code") {
+                        Text(PackSyncLogic.displayPackCode(packCode))
+                            .textSelection(.enabled)
+                            .font(.body.monospaced())
+                    }
+                    LabeledContent("") {
+                        HStack {
+                            Button(inviteCopied ? "Copied ✓" : "Copy invite") {
+                                let pb = NSPasteboard.general
+                                pb.clearContents()
+                                pb.setString(PackSyncLogic.inviteMessage(code: packCode),
+                                             forType: .string)
+                                inviteCopied = true
+                                Task {   // revert the label so a second copy re-confirms
+                                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                                    inviteCopied = false
+                                }
+                            }
+                            Button("Leave pack") { setPack("") }
+                        }
+                    }
+                }
                 TextField("Display name", text: $packDisplayName,
                           prompt: Text(NSFullUserName()))
                 TextField("Slack webhook (optional)", text: $packWebhookURL,
@@ -56,7 +116,7 @@ struct SettingsView: View {
             } header: {
                 Text("Pack")
             } footer: {
-                Text("Everyone with the same pack code (4+ characters, case doesn't matter) sees each other in the menu and gets a nudge when someone finishes a set. Shares only a random install id, your name, set counts, and streak — video never leaves your Mac. The Slack webhook additionally posts each set to a channel; see the README for both setups.")
+                Text("Create a pack, hit Copy invite, and send it to your friends — everyone with the code sees each other in the menu and gets a nudge when someone finishes a set. Codes are auto-generated and unguessable; treat yours like a house key. Shares only a random install id, your name, set counts, and streak — video never leaves your Mac. The Slack webhook additionally posts each set to a channel; see the README.")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -83,13 +143,15 @@ struct SettingsView: View {
             // "yesterday" recap that same evening.
             if v { Prefs.lastDigestDay = Prefs.dayString(Date()) }
         }
-        .onChange(of: packCode) { v in
-            Prefs.packCode = PackSyncLogic.normalizedPackCode(v)
-            PackSync.shared.packChanged()
-        }
         .onChange(of: packWebhookURL) { v in
             Prefs.packWebhookURL = v.trimmingCharacters(in: .whitespacesAndNewlines)
         }
         .onChange(of: packDisplayName) { v in Prefs.packDisplayName = v }
+    }
+
+    private func joinIfValid() {
+        let code = normalizedJoinCode
+        guard PackSyncLogic.isGeneratedCode(code) else { return }
+        setPack(code)
     }
 }

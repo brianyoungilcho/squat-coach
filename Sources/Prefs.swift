@@ -122,10 +122,13 @@ enum Prefs {
 
     // MARK: - Pack sync (shared backend; see supabase/schema.sql)
 
-    /// The shared secret that names your pack, e.g. "SQT-BROS". Empty = no sync.
+    /// The pack's bearer code in canonical form (generated, hyphen-free, e.g.
+    /// "SQTK7MP29WXTV3RHBD" — see PackSyncLogic). Normalized on BOTH read and
+    /// write so every path, including values restored from a prefs backup or
+    /// written via `defaults`, stays canonical. Empty = no sync.
     static var packCode: String {
-        get { d.string(forKey: "packCode") ?? "" }
-        set { d.set(newValue, forKey: "packCode") }
+        get { PackSyncLogic.normalizedPackCode(d.string(forKey: "packCode") ?? "") }
+        set { d.set(PackSyncLogic.normalizedPackCode(newValue), forKey: "packCode") }
     }
     /// Stable per-install identity, minted on first use — display names can
     /// change or collide; this can't.

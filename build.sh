@@ -10,7 +10,7 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 BUILD="$ROOT/.build"
 BIN_NAME="SquatCoach"
 APP="${SQUAT_COACH_APP:-/Applications/Squat Coach.app}"
-VERSION="${SQUAT_COACH_VERSION:-0.4.0}"
+VERSION="${SQUAT_COACH_VERSION:-0.4.1}"
 HOST_ARCH="$(uname -m)"   # arm64 on Apple Silicon — used for the test build only
 
 FRAMEWORKS=(-framework AppKit -framework SwiftUI -framework AVFoundation -framework Vision

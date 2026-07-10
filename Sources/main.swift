@@ -138,7 +138,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // the next open shows anything fresher.
             PackSync.shared.refresh()
             menu.addItem(.separator())
-            let header = NSMenuItem(title: "🤝 Your pack · \(Prefs.packCode)",
+            let header = NSMenuItem(title: "🤝 Your pack · \(PackSyncLogic.displayPackCode(Prefs.packCode))",
                                     action: nil, keyEquivalent: "")
             header.isEnabled = false
             menu.addItem(header)

@@ -34,15 +34,76 @@ enum PackSyncLogic {
     }
 
     // MARK: - Pack codes
+    //
+    // Codes are machine-generated bearer secrets, not user-picked names — two
+    // strangers typing the same obvious word must never collide into one pack,
+    // and the join endpoint is effectively unthrottled, so guessing has to be
+    // infeasible on entropy alone. Design (per Crockford Base32 / RFC 8628 /
+    // ULID practice): 15 random chars of the Crockford alphabet = 75 bits,
+    // "SQT" brand prefix (zero entropy), displayed in 5-char hyphen chunks,
+    // decode-lenient on input (case-folded, hyphens/whitespace ignored,
+    // O→0 and I/L→1).
 
-    /// Codes are case-insensitive: normalized to uppercase on save so two
-    /// friends typing "sqt-bros" and "SQT-BROS" land in the same pack.
-    static func normalizedPackCode(_ raw: String) -> String {
-        raw.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+    /// Crockford Base32: no I, L, O (look like 1/0) and no U (accidental
+    /// obscenity). 32 symbols = 5 bits per character.
+    static let codeAlphabet = Array("0123456789ABCDEFGHJKMNPQRSTVWXYZ")
+    private static let codeAlphabetSet = Set(codeAlphabet)
+
+    /// A fresh pack code in canonical (hyphen-free) form, e.g.
+    /// "SQTK7MP29WXTV3RHBD". SystemRandomNumberGenerator is cryptographically
+    /// secure, so 15 alphabet chars = 75 bits against blind guessing.
+    static func generatePackCode() -> String {
+        "SQT" + String((0..<15).map { _ in codeAlphabet.randomElement()! })
     }
 
-    /// Mirrors the server's CHECK constraint so a too-short code fails in the
-    /// UI instead of silently 4xx-ing on every push.
+    /// Decode-lenient normalization for anything typed or pasted: uppercase,
+    /// fold the confusables the alphabet excludes (O→0, I/L→1), then keep ONLY
+    /// ASCII A-Z/0-9 — hyphens, whitespace, and the invisible junk rich-text
+    /// sources smuggle in (zero-width spaces, directional marks) all drop out.
+    /// Idempotent over both the canonical and display forms of generated codes.
+    static func normalizedPackCode(_ raw: String) -> String {
+        String(raw.uppercased().compactMap { ch -> Character? in
+            switch ch {
+            case "O": return "0"
+            case "I", "L": return "1"
+            default:
+                guard let ascii = ch.asciiValue else { return nil }
+                return (0x30...0x39).contains(ascii) || (0x41...0x5A).contains(ascii) ? ch : nil
+            }
+        })
+    }
+
+    /// True only for codes in the generated shape — the Join field accepts
+    /// nothing else, so hand-invented low-entropy codes (two strangers typing
+    /// the same obvious word) can't come back in through the front door.
+    static func isGeneratedCode(_ code: String) -> Bool {
+        code.count == 18 && code.hasPrefix("SQT")
+            && code.dropFirst(3).allSatisfy { codeAlphabetSet.contains($0) }
+    }
+
+    /// Human form of a generated code: "SQT-K7MP2-9WXTV-3RHBD". Codes that
+    /// aren't ours (self-hosters, custom) pass through untouched.
+    static func displayPackCode(_ code: String) -> String {
+        guard code.count == 18, code.hasPrefix("SQT") else { return code }
+        let body = Array(code.dropFirst(3))
+        return "SQT-" + stride(from: 0, to: body.count, by: 5)
+            .map { String(body[$0..<min($0 + 5, body.count)]) }
+            .joined(separator: "-")
+    }
+
+    /// The message "Copy invite" puts on the clipboard — code plus a way in
+    /// for friends who don't have the app yet.
+    static func inviteMessage(code: String) -> String {
+        """
+        Join my Squat Coach pack 🏋️
+        Pack code: \(displayPackCode(code))
+        Get the app: https://github.com/brianyoungilcho/squat-coach#install
+        Then: menu bar icon → Settings… → Pack → paste the code into “Join”.
+        """
+    }
+
+    /// Mirrors the server's CHECK constraint so a bad code fails in the UI
+    /// instead of silently 4xx-ing on every push.
     static func isValidPackCode(_ code: String) -> Bool {
         (4...40).contains(code.count)
     }
