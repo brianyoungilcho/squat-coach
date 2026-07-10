@@ -39,7 +39,9 @@ struct SettingsView: View {
         Prefs.packCode = code
         joinCode = ""
         inviteCopied = false
-        PackSync.shared.packChanged()
+        // assumeIsolated: CI's older Swift doesn't infer this View helper as
+        // MainActor the way current toolchains do; Button actions run on main.
+        MainActor.assumeIsolated { PackSync.shared.packChanged() }
     }
 
     var body: some View {
