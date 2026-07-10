@@ -21,8 +21,20 @@ struct SettingsView: View {
 
     private var normalizedJoinCode: String { PackSyncLogic.normalizedPackCode(joinCode) }
 
-    /// The one path every pack membership change goes through.
+    /// The one path every pack membership change goes through. Sharing state
+    /// is persisted BEFORE packChanged() — its forced refresh checks isActive,
+    /// and the .onChange persistence for the toggle only lands after this
+    /// closure returns, which would make the first fetch after joining no-op.
     private func setPack(_ code: String) {
+        if code.isEmpty {
+            // Leaving is a clean exit: Slack posts stop too, not just sync.
+            Prefs.packShareEnabled = false
+            packShareEnabled = false
+        } else if !Prefs.packShareEnabled {
+            Prefs.packShareEnabled = true
+            Prefs.lastDigestDay = Prefs.dayString(Date())   // digest arms tomorrow
+            packShareEnabled = true
+        }
         packCode = code
         Prefs.packCode = code
         joinCode = ""
@@ -55,12 +67,9 @@ struct SettingsView: View {
             }
             Section {
                 Toggle("Share finished sets with your pack", isOn: $packShareEnabled)
-                if packCode.isEmpty {
+                if !PackSyncLogic.isValidPackCode(packCode) {
                     LabeledContent("Start a pack") {
-                        Button("Create a pack") {
-                            setPack(PackSyncLogic.generatePackCode())
-                            if !packShareEnabled { packShareEnabled = true }
-                        }
+                        Button("Create a pack") { setPack(PackSyncLogic.generatePackCode()) }
                     }
                     LabeledContent("Join a pack") {
                         HStack {
@@ -69,7 +78,7 @@ struct SettingsView: View {
                                 .autocorrectionDisabled()
                                 .onSubmit { joinIfValid() }
                             Button("Join") { joinIfValid() }
-                                .disabled(!PackSyncLogic.isValidPackCode(normalizedJoinCode))
+                                .disabled(!PackSyncLogic.isGeneratedCode(normalizedJoinCode))
                         }
                     }
                 } else {
@@ -86,6 +95,10 @@ struct SettingsView: View {
                                 pb.setString(PackSyncLogic.inviteMessage(code: packCode),
                                              forType: .string)
                                 inviteCopied = true
+                                Task {   // revert the label so a second copy re-confirms
+                                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                                    inviteCopied = false
+                                }
                             }
                             Button("Leave pack") { setPack("") }
                         }
@@ -138,8 +151,7 @@ struct SettingsView: View {
 
     private func joinIfValid() {
         let code = normalizedJoinCode
-        guard PackSyncLogic.isValidPackCode(code) else { return }
+        guard PackSyncLogic.isGeneratedCode(code) else { return }
         setPack(code)
-        if !packShareEnabled { packShareEnabled = true }
     }
 }

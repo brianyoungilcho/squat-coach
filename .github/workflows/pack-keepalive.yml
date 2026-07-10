@@ -22,5 +22,5 @@ jobs:
             -H "apikey: sb_publishable_xF8Tsxl_TQU04C6ArgRvvw_TFZQ1GUZ" \
             -H "Authorization: Bearer sb_publishable_xF8Tsxl_TQU04C6ArgRvvw_TFZQ1GUZ" \
             -H "Content-Type: application/json" \
-            -d '{"p_code":"KEEPALIVE-PING","p_since":"2026-01-01"}' >/dev/null
+            -d '{"p_code":"KEEPALIVE","p_since":"2026-01-01"}' >/dev/null
           echo "backend pinged"

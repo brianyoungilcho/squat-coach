@@ -90,12 +90,17 @@ do {
     check(PackSyncLogic.isValidPackCode(code), "generated codes pass validation")
 }
 
-// 7. Decode-lenient normalization (Crockford): case, separators, confusables.
+// 7. Decode-lenient normalization (Crockford): case, separators, confusables,
+//    and rich-text paste junk.
 do {
     check(PackSyncLogic.normalizedPackCode("  sqt-k7mp2-9wxtv-3rhbd \n") == "SQTK7MP29WXTV3RHBD",
           "display form normalizes to canonical (case, hyphens, whitespace)")
     check(PackSyncLogic.normalizedPackCode("SQT KOMP2") == "SQTK0MP2", "O folds to 0")
     check(PackSyncLogic.normalizedPackCode("sqt-lian1") == "SQT11AN1", "L and I fold to 1")
+    check(PackSyncLogic.normalizedPackCode("SQT\u{200B}K7\u{FEFF}MP2") == "SQTK7MP2",
+          "zero-width characters from rich-text sources are dropped")
+    check(PackSyncLogic.normalizedPackCode("SQT.K7,MP2!") == "SQTK7MP2",
+          "punctuation is dropped, not kept")
     let code = PackSyncLogic.generatePackCode()
     check(PackSyncLogic.normalizedPackCode(PackSyncLogic.displayPackCode(code)) == code,
           "normalize(display(code)) round-trips to canonical")
@@ -103,6 +108,12 @@ do {
     check(PackSyncLogic.isValidPackCode("SQTS"), "4 chars is valid (server CHECK lower bound)")
     check(!PackSyncLogic.isValidPackCode("SQT"), "3 chars is rejected")
     check(!PackSyncLogic.isValidPackCode(String(repeating: "X", count: 41)), "41 chars is rejected")
+    check(PackSyncLogic.isGeneratedCode(code), "generated codes pass the Join gate")
+    check(PackSyncLogic.isGeneratedCode(PackSyncLogic.normalizedPackCode(PackSyncLogic.displayPackCode(code))),
+          "pasted display form passes the Join gate after normalization")
+    check(!PackSyncLogic.isGeneratedCode("SQUADGOALS"), "hand-invented words fail the Join gate")
+    check(!PackSyncLogic.isGeneratedCode("XYZ" + String(repeating: "2", count: 15)),
+          "right length but wrong prefix fails the Join gate")
 }
 
 // 8. Display chunking and the invite message.
