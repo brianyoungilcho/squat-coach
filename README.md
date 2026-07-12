@@ -1,171 +1,97 @@
 # Squat Coach
 
-A tiny macOS menu-bar app that reminds you to do squats every hour and **counts
-them with your webcam** — no Xcode, no third-party libraries, and your camera
-never leaves your Mac.
-
-It's the Claude Dash pattern (Swift + `swiftc` + a build script) with an added
-camera → Apple Vision → rep-counter pipeline.
+A private macOS menu-bar coach for short movement breaks. Apple Vision counts squats on-device; optional social Packs share finished-set totals with verified members.
 
 ## What it does
 
-- Lives in the menu bar (🏋️ figure icon), no Dock icon.
-- Every hour (configurable), pops a window to the front and posts a notification.
-- Opens your webcam, draws a live skeleton, and counts squats to a target (default 30).
-- Hit the target → logs the set and advances a daily 🔥 streak. **Skip** any time.
-- **Pack (optional, off by default):** post finished sets to a shared Slack channel
-  so friends can keep each other accountable — see [Pack](#pack--squat-with-friends-optional).
-- 100% on-device counting: Apple's Vision framework does the pose detection locally.
-  No video is recorded, saved, or sent anywhere — with Pack sharing on, only your
-  display name, set counts, and streak are posted.
+- Offers configurable 30–120 minute movement reminders with Start, Snooze, and Skip actions.
+- Opens the camera only after the user starts a workout.
+- Counts reps locally with Apple Vision and gives depth/tracking feedback.
+- Records completed sets, streaks, and explicitly saved partial effort.
+- Creates private Packs with expiring, revocable invite links.
+- Shows member activity and reactions in a dedicated Pack window.
+- Queues completed Pack events on disk and retries idempotently after network failures.
+- Uses Supabase anonymous auth with sessions stored in macOS Keychain.
 
-## Requirements
+Slack webhooks and bearer-code Packs were removed. Existing Pack codes cannot be migrated safely; users create a new Pack or join with a fresh invite. Local workout history is unaffected.
 
-- macOS 13+ (built/tested on macOS 26).
-- **Xcode Command Line Tools only** (`xcode-select --install`) — no Xcode.app needed.
+## Privacy and security
 
-## Install
+- Camera frames are processed on the Mac and are never recorded or uploaded.
+- Packs share the chosen display name, finished-set reps, daily set count, streak, and event time.
+- Pack access is authorized by Supabase user identity and database membership, not possession of a permanent Pack code.
+- Invite tokens are shown only to the creator, stored server-side as SHA-256 hashes, and expire after seven days.
+- Every exposed table has row-level security. Members can only read their own Packs and can only write as themselves.
+- The publishable Supabase key in the app is public by design. The service-role key exists only in Edge Function secrets.
+- Update checks open the signed GitHub release page; the app no longer replaces its own bundle from an unauthenticated download.
+- The privacy manifest is in `Assets/PrivacyInfo.xcprivacy`.
 
-Requires macOS 13+ and the Xcode Command Line Tools
-(`xcode-select --install` — one-time, no full Xcode needed).
+Anonymous accounts are intentionally invisible. Removing the app’s Keychain item creates a new identity, so the user will need a fresh Pack invite.
 
-### Homebrew (recommended)
+## Build and test
 
-```bash
-brew install --cask --no-quarantine brianyoungilcho/tap/squat-coach
-```
+Requirements:
 
-`--no-quarantine` because the app is ad-hoc signed, not notarized. Upgrade later
-with `brew upgrade --cask squat-coach`, or from inside the app: **Check for
-Updates… → Install and Relaunch** downloads the new version and swaps it in
-place. (In-app updates don't update Homebrew's own bookkeeping — a later
-`brew upgrade` just reinstalls the version you already have, which is harmless.)
-On first launch, allow **Camera** and **Notifications** when macOS asks —
-pose detection runs entirely on-device; no video is recorded, saved, or sent.
-
-### Prebuilt zip (manual)
-
-From [Releases](https://github.com/brianyoungilcho/squat-coach/releases): unzip,
-**drag `Squat Coach.app` into `/Applications`** (required — running from Downloads
-breaks start-at-login via App Translocation), then clear quarantine:
-`xattr -dr com.apple.quarantine "/Applications/Squat Coach.app"` and open it.
-
-### Build from source (no Gatekeeper friction)
+- macOS 13 or newer
+- Swift 6.1 or newer
+- Docker Desktop for local Supabase tests
 
 ```bash
-git clone https://github.com/brianyoungilcho/squat-coach.git && cd squat-coach && ./install.sh
+./build.sh --test
+swift build --only-use-versions-from-resolved-file
+./build.sh
 ```
 
-Builds into `/Applications/Squat Coach.app`, launches it, and registers a login
-item. Re-run `./install.sh` after any edit to rebuild and relaunch.
+`./build.sh` creates a universal arm64/x86_64 app with SwiftPM, stages and validates the bundle, ad-hoc signs it for local use, and installs it to `/Applications/Squat Coach.app`. Override the destination with `SQUAT_COACH_APP`.
 
-## Use
+The logic suite covers reminder cadence, squat/dropout regressions, history retention, invite parsing, update URL validation, and durable/idempotent outbox behavior.
 
-- Click the menu-bar icon → **Do 30 squats now** (or wait for the hourly reminder).
-- Stand back so your **hips and knees (thighs)** are in frame, then squat — no need
-  to fit your feet in, so it works right at a laptop.
-- Change the interval / target / sensitivity / rep-sound from the same menu, or in
-  **Settings**.
-- `kill -USR1 $(pgrep -f 'Squat Coach.app/Contents/MacOS/SquatCoach')` triggers a
-  reminder immediately (handy for scripting a "remind me now").
+## Local social backend
 
-## Pack — squat with friends (optional)
-
-Start a pack, invite your friends, and everyone shows up in each other's menu —
-sets today, the last five days as pacing dots, streaks — plus a Mac
-notification when a packmate finishes a set. Everyone sees everyone pacing;
-nobody has to ask. Off by default.
-
-**Setup (~1 minute):** menu-bar icon → **Settings…** → **Pack** →
-**Create a pack**. The app generates an unguessable code like
-`SQT-K7MP2-9WXTV-3RHBD` (75 bits of randomness, Crockford Base32 — no
-confusable 0/O or 1/I/l characters). Hit **Copy invite** and send it to your
-friends; they paste it into **Join a pack**. Codes are case-insensitive and
-typo-tolerant (hyphens and spaces are ignored; a stray `O` or `l` is read as
-`0`/`1`), so retyping from a phone screen works too.
-
-**Optional Slack layer:** every finished set can also post a one-liner
-("🏋️ Brian finished a set — 30 squats · 2 sets today · 🔥 12-day streak") plus
-a short morning recap of yesterday into a channel. One person creates the
-webhook at [api.slack.com/apps](https://api.slack.com/apps) → **Create New
-App** → *From scratch* → **Incoming Webhooks** → **On** → **Add New Webhook to
-Workspace** → pick the channel → share the `https://hooks.slack.com/…` URL with
-the pack (treat it like a house key). Each member pastes it in Settings and hits
-**Send a test post**.
-
-**Privacy:** sharing is opt-in and sends only a random install id, your display
-name, your squat and set counts, and your streak. Camera frames and pose data
-never leave your Mac, sharing on or off. Pack state lives in a shared community
-database that only answers for a specific pack code (enforced server-side).
-Treat the code like a house key: anyone who has it sees that pack, so use a
-nickname if you don't want your name in it, and **Leave pack** + create a new
-one if a code ever leaks beyond your friends.
-
-**Self-hosting the pack backend:** the app ships pointed at a community
-[Supabase](https://supabase.com) project (schema + policies in
-[supabase/schema.sql](supabase/schema.sql)). To run your own, create a free
-project, paste that schema into its SQL editor, then point the app at it:
+The backend source lives under `supabase/`.
 
 ```bash
-defaults write com.squatcoach.app packBackendURL "https://YOURREF.supabase.co"
-defaults write com.squatcoach.app packBackendKey "sb_publishable_YOURKEY"
+npx supabase start
+npx supabase db reset --local --no-seed --yes
+npx supabase test db --local supabase/tests/social_packs.sql
+SUPABASE_BIN="$(pwd)/node_modules/.bin/supabase" ./supabase/tests/e2e.sh
 ```
 
-## How it counts
+If Supabase is run through `npx` rather than a local package, set `SUPABASE_BIN` to that executable. The E2E script creates three anonymous users and verifies create, invite, join, member/nonmember reads, idempotent event delivery, leave, and delete.
 
-Joints come from Apple's `VNDetectHumanBodyPoseRequest` (on-device). The signal
-is **thigh depth** — how far your hips drop relative to your knees, normalized to
-your own standing height so it's independent of camera distance and works from a
-head-on laptop webcam (a raw knee *angle* barely changes head-on, which is why an
-earlier version over-counted):
+To point a development build at the local stack:
 
-```
-depth = (hipY − kneeY) / (standing hipY − kneeY)      # 1.0 standing → ~0 deep
+```bash
+SQUAT_COACH_SUPABASE_URL=http://127.0.0.1:54321 \
+SQUAT_COACH_SUPABASE_KEY='<local publishable key>' \
+swift run SquatCoach
 ```
 
-`SquatCounter.swift` runs a state machine on the smoothed depth:
+## Production rollout
 
-- **down** when depth `< 0.62` (Normal), back to **standing** when it recovers;
-- a rep counts on the **down → up** transition;
-- guards that kill miscounts: a hysteresis dead-band, a **dwell** requirement
-  (2 sustained frames), a **1 s debounce**, a **dropout reset**, and a per-joint
-  **confidence gate**. Only hips + knees need to be in frame — not ankles.
+1. Link the intended Supabase project.
+2. Enable anonymous sign-ins and keep the configured anonymous-user rate limit.
+3. Apply `supabase/migrations/20260712043000_secure_social_packs.sql`.
+4. Deploy `create-pack`, `join-pack`, `rotate-invite`, `leave-pack`, and `delete-pack` with JWT verification enabled.
+5. Run Supabase security and performance advisors.
+6. Replace `SocialBackend.defaultBaseURL` and `defaultPublishableKey` if the production project differs.
+7. Build, notarize, and publish a signed release.
 
-Sensitivity (Easy / Normal / Strict) shifts the `< 0.62` threshold. Verified
-against logged squats: 5/5 counted, ~2 s cadence, no doubles.
+The current migration revokes the legacy `pack_fetch` and `pack_upsert` RPCs as part of the clean reset.
 
-Run the counter tests: `./build.sh --test`.
+## Project layout
 
-## Files
+- `Sources/` — AppKit/SwiftUI app, pose counter, scheduler, social client, Pack UI.
+- `Tests/LogicTests.swift` — deterministic headless regression runner.
+- `supabase/migrations/` — Pack schema, RLS, helpers, and legacy shutdown.
+- `supabase/functions/` — authenticated Pack lifecycle Edge Functions.
+- `supabase/tests/` — adversarial SQL and local API E2E tests.
+- `.github/workflows/ci.yml` — build and test gates.
 
-| File | Role |
-|---|---|
-| `Sources/main.swift` | Menu-bar app delegate, scheduler wiring, notifications, login item |
-| `Sources/Scheduler.swift` | Hourly wall-clock-aligned trigger (App-Nap-safe) |
-| `Sources/PoseCamera.swift` | AVFoundation capture → Vision pose → thigh-depth signal |
-| `Sources/SquatCounter.swift` | The rep-counting state machine (pure, unit-tested) |
-| `Sources/WorkoutWindow.swift` | Pop-to-front window, camera preview + skeleton, SwiftUI HUD |
-| `Sources/Prefs.swift` | UserDefaults settings + streak store + per-day history |
-| `Sources/PackLogic.swift` | Pack message/digest/history logic (pure, unit-tested) |
-| `Sources/PackShare.swift` | Fire-and-forget Slack webhook posts (opt-in) |
-| `Sources/PackSyncLogic.swift` | Pack view logic: grouping, pacing dots, diffs (pure, unit-tested) |
-| `Sources/PackSync.swift` | Shared-backend sync: upsert on set, fetch for the menu (opt-in) |
-| `Sources/UpdaterLogic.swift` | Release parsing + version compare (pure, unit-tested) |
-| `Sources/Updater.swift` | One-click self-update: download, verify, swap, relaunch |
-| `build.sh` / `install.sh` | `swiftc` build + `.app` assembly + ad-hoc sign |
+## Diagnostics
 
-## Credits
+Set `SQUAT_POSE_LOG=1` before launching to write pose diagnostics to:
 
-Created and maintained by [Brian Cho](https://github.com/brianyoungilcho).
-To cite this project, use GitHub's **"Cite this repository"** button (backed by
-[CITATION.cff](CITATION.cff)) — and if it kept you moving, a ⭐ helps others find it.
+`~/Library/Application Support/SquatCoach/pose-diagnostics.log`
 
-- Built on the [Claude Dash](https://github.com/brianyoungilcho/claude-dash)
-  pattern (Swift + `swiftc` + a build script, no Xcode).
-- Squat detection uses Apple's on-device
-  [Vision](https://developer.apple.com/documentation/vision) framework
-  (`VNDetectHumanBodyPoseRequest`) — no third-party libraries, no cloud.
-- Built with [Claude Code](https://claude.com/claude-code) (Anthropic).
-- Not affiliated with or endorsed by Anthropic or Apple.
-
-MIT licensed.
+The file is created with user-only permissions and contains pose/depth values, not video.

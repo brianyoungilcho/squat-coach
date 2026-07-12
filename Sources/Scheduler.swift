@@ -1,11 +1,8 @@
 import Foundation
-import AppKit
 
-/// Fires `onFire` every `intervalMinutes`, aligned to the wall clock, and holds
-/// an activity token so App Nap doesn't suspend the timer while we're idle in
-/// the menu bar. A single-shot timer that reschedules itself is more robust than
-/// a repeating one — it re-reads the interval each cycle, so a settings change
-/// takes effect on the next fire without teardown.
+/// Fires `onFire` every `intervalMinutes`. A single-shot timer that reschedules
+/// itself preserves 45/90-minute cadence, skips delayed catch-up bursts, and
+/// re-reads preferences after every fire.
 @MainActor
 final class Scheduler {
     var onFire: (() -> Void)?
@@ -14,37 +11,39 @@ final class Scheduler {
     private(set) var nextFire: Date?
 
     private var timer: Timer?
-    private var activity: NSObjectProtocol?
 
     func start() {
-        if activity == nil {
-            activity = ProcessInfo.processInfo.beginActivity(
-                options: [.userInitiated], reason: "Hourly squat reminder")
+        guard Prefs.remindersEnabled else {
+            stop()
+            return
         }
-        scheduleNext()
+        scheduleNext(previousScheduledFire: nil)
     }
 
     /// Re-arm after the interval changes in settings.
-    func reschedule() { scheduleNext() }
+    func reschedule() { start() }
+
+    func stop() {
+        timer?.invalidate()
+        timer = nil
+        nextFire = nil
+    }
 
     /// Manual "Squats now" from the menu.
     func triggerNow() { onFire?() }
 
-    private func scheduleNext() {
+    private func scheduleNext(previousScheduledFire: Date?) {
         timer?.invalidate()
         let interval = TimeInterval(max(1, Prefs.intervalMinutes) * 60)
-        // Next boundary measured from the top of the current hour, so a 60-min
-        // interval lands on :00 and shorter intervals stay phase-locked to it.
         let now = Date()
-        let startOfHour = Calendar.current.dateInterval(of: .hour, for: now)?.start ?? now
-        var fire = startOfHour
-        while fire <= now { fire = fire.addingTimeInterval(interval) }
+        let fire = ReminderSchedule.nextFireDate(
+            now: now, interval: interval, previousScheduledFire: previousScheduledFire)
         nextFire = fire
         let t = Timer(timeInterval: fire.timeIntervalSince(now), repeats: false) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
                 self.onFire?()
-                self.scheduleNext()
+                self.scheduleNext(previousScheduledFire: fire)
             }
         }
         RunLoop.main.add(t, forMode: .common)

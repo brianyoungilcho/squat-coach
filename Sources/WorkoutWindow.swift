@@ -4,6 +4,27 @@ import AVFoundation
 import Vision
 import QuartzCore
 
+struct WorkoutSessionConfiguration {
+    let targetReps: Int
+    let sensitivityMinPromFrac: Double
+    let sensitivityDownEnter: Double
+    let soundEnabled: Bool
+
+    @MainActor static func snapshot() -> WorkoutSessionConfiguration {
+        WorkoutSessionConfiguration(
+            targetReps: Prefs.targetReps,
+            sensitivityMinPromFrac: Prefs.sensitivityMinPromFrac,
+            sensitivityDownEnter: Prefs.sensitivityDownEnter,
+            soundEnabled: Prefs.soundEnabled)
+    }
+}
+
+enum WorkoutOutcome {
+    case completed(reps: Int)
+    case partial(reps: Int)
+    case discarded
+}
+
 // MARK: - Observable state for the SwiftUI HUD
 
 @MainActor
@@ -14,9 +35,14 @@ final class WorkoutState: ObservableObject {
     @Published var bodyVisible = false
     @Published var legsVisible = false
     @Published var depth: Double = 1.0     // 1 = standing, → 0 = deep
-    @Published var cameraDenied = false
-    var onSkip: (() -> Void)?
+    @Published var depthThreshold = Prefs.sensitivityDownEnter
+    @Published var cameraStatus: CameraStatus = .requesting
+    @Published var showEndEarly = false
+    var onEndEarly: (() -> Void)?
+    var onSavePartial: (() -> Void)?
+    var onDiscard: (() -> Void)?
     var onDone: (() -> Void)?
+    var onOpenCameraSettings: (() -> Void)?
 }
 
 // MARK: - Camera preview + skeleton overlay (AppKit / CoreAnimation)
@@ -93,6 +119,8 @@ struct WorkoutHUD: View {
                         .font(.system(size: 46, weight: .heavy, design: .rounded))
                         .foregroundColor(.white)
                         .contentTransition(.numericText())
+                        .accessibilityLabel("Rep count")
+                        .accessibilityValue("\(state.reps) of \(state.target)")
                 }
                 Spacer()
                 pill
@@ -106,29 +134,43 @@ struct WorkoutHUD: View {
                 if state.legsVisible { depthMeter }
                 ProgressView(value: Double(min(state.reps, state.target)), total: Double(max(1, state.target)))
                     .tint(.green)
+                    .accessibilityLabel("Workout progress")
+                    .accessibilityValue("\(state.reps) of \(state.target) reps")
                 Text(hint)
                     .font(.callout)
                     .foregroundColor(hintColor)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity)
+                if offersCameraSettings {
+                    Button("Open System Settings") { state.onOpenCameraSettings?() }
+                        .buttonStyle(.bordered)
+                }
                 HStack {
-                    Button("Skip") { state.onSkip?() }
+                    Button("End early") { state.onEndEarly?() }
                         .buttonStyle(.bordered)
                     Spacer()
-                    Button(state.reps >= state.target ? "Done ✓" : "I'm done") { state.onDone?() }
+                    Button("Done ✓") { state.onDone?() }
                         .buttonStyle(.borderedProminent)
                         .keyboardShortcut(.defaultAction)
+                        .disabled(state.reps < state.target)
                 }
             }
             .padding(16)
             .background(.black.opacity(0.4))
+        }
+        .confirmationDialog("End workout early?", isPresented: $state.showEndEarly) {
+            Button("Save partial effort") { state.onSavePartial?() }
+            Button("Discard workout", role: .destructive) { state.onDiscard?() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Save \(state.reps) completed reps as partial effort, or discard this workout.")
         }
     }
 
     /// Live depth bar: the fill shrinks as you lower; a yellow tick marks the
     /// "counts as a squat" threshold, so you can see exactly how deep to go.
     private var depthMeter: some View {
-        let downAt = Prefs.sensitivityDownEnter
+        let downAt = state.depthThreshold
         return VStack(spacing: 3) {
             HStack {
                 Text("depth").font(.caption2).foregroundColor(.white.opacity(0.7))
@@ -147,10 +189,28 @@ struct WorkoutHUD: View {
             }
             .frame(height: 8)
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Squat depth")
+        .accessibilityValue("\(Int(state.depth * 100)) percent")
     }
 
     private var hint: String {
-        if state.cameraDenied { return "Camera access is off — enable it in System Settings ▸ Privacy & Security ▸ Camera, then reopen." }
+        switch state.cameraStatus {
+        case .requesting:
+            return "Requesting camera access…"
+        case .denied:
+            return "Camera access is off. Enable it in System Settings."
+        case .restricted:
+            return "Camera access is restricted on this Mac."
+        case .unavailable:
+            return "No camera is available."
+        case .interrupted:
+            return "Camera tracking was interrupted."
+        case .failed(let message):
+            return message
+        case .running:
+            break
+        }
         if !state.bodyVisible { return "Step into the camera's view." }
         if !state.legsVisible { return "Move back until your hips and knees (your thighs) are in frame." }
         switch state.phase {
@@ -159,16 +219,105 @@ struct WorkoutHUD: View {
         case .standing: return "Squat down"
         }
     }
-    private var hintColor: Color { state.cameraDenied ? .yellow : .white.opacity(0.9) }
+    private var hintColor: Color { state.cameraStatus == .running ? .white.opacity(0.9) : .yellow }
+
+    private var offersCameraSettings: Bool {
+        switch state.cameraStatus {
+        case .denied, .restricted:
+            return true
+        case .requesting, .running, .unavailable, .interrupted, .failed:
+            return false
+        }
+    }
 
     private var pill: some View {
-        let label = state.cameraDenied ? "no camera" : (state.bodyVisible ? "tracking" : "no body")
-        let color: Color = state.cameraDenied ? .red : (state.bodyVisible ? .green : .gray)
+        let label: String
+        let color: Color
+        switch state.cameraStatus {
+        case .requesting:
+            label = "requesting"; color = .gray
+        case .running:
+            label = state.bodyVisible ? "tracking" : "no body"
+            color = state.bodyVisible ? .green : .gray
+        case .denied:
+            label = "denied"; color = .red
+        case .restricted:
+            label = "restricted"; color = .red
+        case .unavailable:
+            label = "no camera"; color = .red
+        case .interrupted:
+            label = "interrupted"; color = .orange
+        case .failed:
+            label = "camera error"; color = .red
+        }
         return Text(label)
             .font(.caption).bold()
             .padding(.horizontal, 10).padding(.vertical, 5)
             .background(Capsule().fill(color.opacity(0.85)))
             .foregroundColor(.white)
+            .accessibilityLabel("Tracking status")
+            .accessibilityValue(label)
+    }
+}
+
+struct WorkoutReceiptView: View {
+    let outcome: WorkoutOutcome
+    let queuedForPack: Bool
+    let onClose: () -> Void
+
+    var body: some View {
+        VStack(spacing: 18) {
+            Image(systemName: icon)
+                .font(.system(size: 42))
+                .foregroundStyle(.green)
+                .accessibilityHidden(true)
+            Text(title)
+                .font(.title2.bold())
+            Text(detail)
+                .foregroundStyle(.secondary)
+            if queuedForPack {
+                Label("Queued for your Pack", systemImage: "person.3")
+                    .font(.callout)
+            }
+            Button("Done", action: onClose)
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+        }
+        .padding(32)
+        .frame(minWidth: 420, minHeight: 300)
+    }
+
+    private var icon: String {
+        switch outcome {
+        case .completed:
+            return "checkmark.circle.fill"
+        case .partial:
+            return "figure.walk.circle.fill"
+        case .discarded:
+            return "xmark.circle"
+        }
+    }
+
+    private var title: String {
+        switch outcome {
+        case .completed:
+            return "Set complete"
+        case .partial:
+            return "Partial effort saved"
+        case .discarded:
+            return "Workout discarded"
+        }
+    }
+
+    private var detail: String {
+        switch outcome {
+        case .completed(let reps):
+            return "\(reps) squats · \(Prefs.setsToday) sets today · \(Prefs.currentStreak)-day streak"
+        case .partial(let reps):
+            return "\(reps) reps saved locally. Streak and Pack totals were not changed."
+        case .discarded:
+            return "No workout data was saved."
+        }
     }
 }
 
@@ -176,34 +325,53 @@ struct WorkoutHUD: View {
 
 @MainActor
 final class WorkoutController: NSObject {
-    /// true = hit the target, false = skipped / closed early.
-    var onFinished: ((Bool) -> Void)?
+    var onFinished: ((WorkoutOutcome) -> Void)?
+    var onVisibilityChange: (() -> Void)?
+    var isVisible: Bool { window?.isVisible == true }
 
     private var window: NSPanel?
     private var container: CameraContainerView?
     private let state = WorkoutState()
     private var camera: PoseCamera?
+    private var configuration: WorkoutSessionConfiguration?
     private var finished = false
 
     func present() {
         // If a session is already up, just bring it forward.
         if window != nil { popToFront(); return }
 
+        let configuration = WorkoutSessionConfiguration.snapshot()
+        self.configuration = configuration
         finished = false
         state.reps = 0
-        state.target = Prefs.targetReps
+        state.target = configuration.targetReps
         state.phase = .standing
         state.bodyVisible = false
-        state.cameraDenied = false
-        state.onSkip = { [weak self] in self?.complete(success: false) }
+        state.legsVisible = false
+        state.depth = 1.0
+        state.depthThreshold = configuration.sensitivityDownEnter
+        state.cameraStatus = .requesting
+        state.showEndEarly = false
+        state.onEndEarly = { [weak self] in self?.state.showEndEarly = true }
+        state.onSavePartial = { [weak self] in
+            guard let self else { return }
+            self.complete(outcome: .partial(reps: self.state.reps))
+        }
+        state.onDiscard = { [weak self] in self?.complete(outcome: .discarded) }
         state.onDone = { [weak self] in
             guard let self else { return }
-            self.complete(success: self.state.reps >= Prefs.targetReps)
+            guard self.state.reps >= configuration.targetReps else { return }
+            self.complete(outcome: .completed(reps: self.state.reps))
+        }
+        state.onOpenCameraSettings = {
+            guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Camera")
+            else { return }
+            NSWorkspace.shared.open(url)
         }
 
-        let camera = PoseCamera()
+        let camera = PoseCamera(minPromFrac: configuration.sensitivityMinPromFrac)
         self.camera = camera
-        camera.onAuth = { [weak self] ok in self?.state.cameraDenied = !ok }
+        camera.onStatus = { [weak self] status in self?.state.cameraStatus = status }
         camera.onUpdate = { [weak self] pose, reps, phase in
             guard let self else { return }
             self.container?.render(pose)
@@ -213,8 +381,10 @@ final class WorkoutController: NSObject {
             self.state.phase = phase
             if reps != self.state.reps {
                 self.state.reps = reps
-                if Prefs.soundEnabled { NSSound(named: "Tink")?.play() }
-                if reps >= Prefs.targetReps { self.complete(success: true) }
+                if configuration.soundEnabled { NSSound(named: "Tink")?.play() }
+                if reps >= configuration.targetReps {
+                    self.complete(outcome: .completed(reps: reps))
+                }
             }
         }
 
@@ -272,27 +442,51 @@ final class WorkoutController: NSObject {
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
         window?.orderFrontRegardless()
+        onVisibilityChange?()
     }
 
-    private func complete(success: Bool) {
+    private func complete(outcome: WorkoutOutcome) {
         guard !finished else { return }
         finished = true
-        if success {
+        var queuedForPack = false
+        switch outcome {
+        case .completed(let reps):
             Prefs.recordCompletedSet()
-            PackShare.postSetCompleted(reps: state.reps)
-            PackSync.shared.pushToday()
+            queuedForPack = PackStore.shared.isJoined
+            PackStore.shared.recordCompletedWorkout(reps: reps)
+        case .partial(let reps):
+            Prefs.recordPartialEffort(reps: reps)
+        case .discarded:
+            break
         }
-        onFinished?(success)
-        window?.close()          // → willClose → handleClosed()
+        onFinished?(outcome)
+        if case .discarded = outcome {
+            window?.close()
+            return
+        }
+        camera?.stop()
+        camera = nil
+        container = nil
+        window?.contentView = NSHostingView(
+            rootView: WorkoutReceiptView(
+                outcome: outcome,
+                queuedForPack: queuedForPack,
+                onClose: { [weak self] in self?.window?.close() }
+            )
+        )
     }
 
     /// Single teardown path for every exit (Done, Skip, red close button).
     private func handleClosed() {
         camera?.stop()
         camera = nil
+        configuration = nil
         container = nil
         window = nil
-        if !finished { finished = true; onFinished?(false) }
-        NSApp.setActivationPolicy(.accessory)
+        if !finished {
+            finished = true
+            onFinished?(.discarded)
+        }
+        onVisibilityChange?()
     }
 }
