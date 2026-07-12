@@ -1,0 +1,35 @@
+name: Pack backend keep-alive
+
+# Free Supabase projects pause after ~7 days without activity. Packs in daily
+# use keep the project alive on their own; this twice-weekly ping covers
+# vacation weeks. The key below is the app's *publishable* key — it ships in
+# the app binary and is public by design (RLS is the boundary).
+on:
+  schedule:
+    - cron: "17 9 * * 1,4"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      # Signs in anonymously (an auth-database write) and runs a real RLS
+      # query as that user (a Postgres read) — both count as activity. Each
+      # run leaves one anonymous auth user behind (~2/week); that's harmless
+      # and deliberate. NEVER blanket-delete anonymous users to tidy up:
+      # every real app identity is an anonymous user too, and deleting one
+      # cascades away its pack memberships and workout history.
+      - name: Ping the pack backend
+        run: |
+          api="https://dpkyrftbxuhwwwtaftga.supabase.co"
+          key="sb_publishable_xF8Tsxl_TQU04C6ArgRvvw_TFZQ1GUZ"
+          token="$(
+            curl -sf -X POST "$api/auth/v1/signup" \
+              -H "apikey: $key" \
+              -H "Content-Type: application/json" \
+              -d '{}' | jq --exit-status --raw-output '.access_token'
+          )"
+          curl -sf "$api/rest/v1/packs?select=id&limit=1" \
+            -H "apikey: $key" \
+            -H "Authorization: Bearer $token" >/dev/null
+          echo "backend pinged"
