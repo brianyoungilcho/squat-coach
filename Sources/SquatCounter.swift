@@ -80,12 +80,12 @@ final class SquatCounter {
     /// Feed one frame. `depth`: 1.0 = standing, → 0 = deep squat.
     func update(depth: Double, confidence: Double, time: TimeInterval) {
         guard confidence >= config.minConfidence else {
-            if time - lastValidTime > config.resetAfterNoBody { softReset() }
+            missingObservation(time: time)
             return
         }
         // Detection dropout: don't blend pre- and post-gap frames.
         if time - lastValidTime > config.gapReset {
-            recent.removeAll(); downStreak = 0; upStreak = 0
+            cancelInProgressRep()
         }
         lastValidTime = time
 
@@ -129,6 +129,15 @@ final class SquatCounter {
         }
     }
 
+    /// Report a frame where no usable body/leg observation was available.
+    func missingObservation(time: TimeInterval) {
+        recent.removeAll()
+        downStreak = 0
+        upStreak = 0
+        if time - lastValidTime > config.gapReset { cancelInProgressRep() }
+        if time - lastValidTime > config.resetAfterNoBody { softReset() }
+    }
+
     func reset() { reps = 0; softReset() }
 
     private func softReset() {
@@ -142,5 +151,16 @@ final class SquatCounter {
         downStreak = 0
         upStreak = 0
         lastRepTime = -.infinity
+    }
+
+    /// A rep that crosses an observation gap is ambiguous. Keep completed reps
+    /// and the learned standing reference, but require a fresh descent.
+    private func cancelInProgressRep() {
+        recent.removeAll()
+        state = .up
+        phase = .standing
+        repMin = standingRef
+        downStreak = 0
+        upStreak = 0
     }
 }

@@ -8,20 +8,34 @@ permissions:
 
 jobs:
   release:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+      - name: Run regressions
+        run: ./build.sh --test
       - name: Build app bundle
-        run: SQUAT_COACH_VERSION="${GITHUB_REF_NAME#v}" ./build.sh
+        env:
+          SQUAT_COACH_APP: ${{ runner.temp }}/Squat Coach.app
+          SQUAT_COACH_VERSION: ${{ github.ref_name }}
+        run: |
+          SQUAT_COACH_VERSION="${GITHUB_REF_NAME#v}" ./build.sh
+          codesign --verify --deep --strict "$SQUAT_COACH_APP"
       - name: Zip
-        run: ditto -c -k --keepParent "/Applications/Squat Coach.app" "Squat-Coach-${GITHUB_REF_NAME#v}.zip"
+        env:
+          APP: ${{ runner.temp }}/Squat Coach.app
+        run: |
+          ditto -c -k --keepParent "$APP" "Squat-Coach-${GITHUB_REF_NAME#v}.zip"
+          shasum -a 256 "Squat-Coach-${GITHUB_REF_NAME#v}.zip" \
+            > "Squat-Coach-${GITHUB_REF_NAME#v}.zip.sha256"
       - name: Create release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" "Squat-Coach-${GITHUB_REF_NAME#v}.zip" \
+          gh release create "$GITHUB_REF_NAME" \
+            "Squat-Coach-${GITHUB_REF_NAME#v}.zip" \
+            "Squat-Coach-${GITHUB_REF_NAME#v}.zip.sha256" \
             --title "Squat Coach $GITHUB_REF_NAME" --generate-notes \
-            --notes "**Install:** unzip, drag Squat Coach.app into /Applications, then run \`xattr -dr com.apple.quarantine \"/Applications/Squat Coach.app\"\` (the app is not notarized). Building from source avoids this — see the README."
+            --notes "**Install:** verify the published SHA-256 file, unzip, and drag Squat Coach.app into /Applications. This community build is ad-hoc signed; a Developer ID signed and notarized distribution remains required before broad public rollout."
 
       # Bumps the Homebrew tap so `brew upgrade` serves this release.
       # Auth: an SSH deploy key scoped to the brianyoungilcho/homebrew-tap repo

@@ -2,7 +2,7 @@ import Foundation
 
 /// Tiny UserDefaults-backed settings + streak store. No database — this is a
 /// personal single-user app, so flat keys are the right amount of machinery.
-enum Prefs {
+@MainActor enum Prefs {
     private static let d = UserDefaults.standard
 
     /// Registered once at launch so first-run reads sensible values.
@@ -12,7 +12,8 @@ enum Prefs {
             "targetReps": 30,
             "soundEnabled": true,
             "sensitivity": 1,   // 0 = Easy (shallow), 1 = Normal, 2 = Strict (deep)
-            "packShareEnabled": false,
+            "remindersEnabled": true,
+            "packNotificationShowsNames": false,
         ])
     }
 
@@ -41,6 +42,14 @@ enum Prefs {
     static var soundEnabled: Bool {
         get { d.bool(forKey: "soundEnabled") }
         set { d.set(newValue, forKey: "soundEnabled") }
+    }
+    static var remindersEnabled: Bool {
+        get { d.bool(forKey: "remindersEnabled") }
+        set { d.set(newValue, forKey: "remindersEnabled") }
+    }
+    static var onboardingCompleted: Bool {
+        get { d.bool(forKey: "onboardingCompleted") }
+        set { d.set(newValue, forKey: "onboardingCompleted") }
     }
 
     // MARK: - Streak / history
@@ -79,14 +88,14 @@ enum Prefs {
         set { d.set(newValue, forKey: "dayLog") }
     }
 
-    static func dayString(_ date: Date) -> String { PackLogic.dayString(date) }
+    static func dayString(_ date: Date) -> String { HistoryLogic.dayString(date) }
 
     /// Record a completed set: bump today's count and advance the daily streak.
     static func recordCompletedSet() {
         setsToday += 1
         lastSetAt = Date()
         let today = dayString(Date())
-        dayLog = PackLogic.updatedDayLog(dayLog, today: today, setsToday: setsToday)
+        dayLog = HistoryLogic.updatedDayLog(dayLog, today: today, setsToday: setsToday)
         guard lastCompletedDay != today else { return }   // streak already counted today
         let cal = Calendar.current
         let yesterday = cal.date(byAdding: .day, value: -1, to: Date()).map(dayString) ?? ""
@@ -94,66 +103,73 @@ enum Prefs {
         lastCompletedDay = today
     }
 
-    // MARK: - Pack sharing (opt-in, off by default)
-
-    static var packShareEnabled: Bool {
-        get { d.bool(forKey: "packShareEnabled") }
-        set { d.set(newValue, forKey: "packShareEnabled") }
-    }
-    /// The pack's shared Slack incoming-webhook URL (https://hooks.slack.com/…).
-    static var packWebhookURL: String {
-        get { d.string(forKey: "packWebhookURL") ?? "" }
-        set { d.set(newValue, forKey: "packWebhookURL") }
-    }
-    /// Name shown to the pack; empty means "use the macOS account's full name".
-    static var packDisplayName: String {
-        get { d.string(forKey: "packDisplayName") ?? "" }
-        set { d.set(newValue, forKey: "packDisplayName") }
-    }
-    static var packResolvedName: String {
-        let n = packDisplayName.trimmingCharacters(in: .whitespaces)
-        return n.isEmpty ? NSFullUserName() : n
-    }
-    /// yyyy-MM-dd of the last day a morning digest was posted (or consumed).
-    static var lastDigestDay: String {
-        get { d.string(forKey: "lastDigestDay") ?? "" }
-        set { d.set(newValue, forKey: "lastDigestDay") }
+    static var partialRepsToday: Int {
+        get {
+            guard d.string(forKey: "partialRepsDay") == dayString(Date()) else { return 0 }
+            return d.integer(forKey: "partialRepsCount")
+        }
+        set {
+            d.set(dayString(Date()), forKey: "partialRepsDay")
+            d.set(max(0, newValue), forKey: "partialRepsCount")
+        }
     }
 
-    // MARK: - Pack sync (shared backend; see supabase/schema.sql)
+    static func recordPartialEffort(reps: Int) {
+        guard reps > 0 else { return }
+        partialRepsToday += reps
+        lastSetAt = Date()
+    }
 
-    /// The pack's bearer code in canonical form (generated, hyphen-free, e.g.
-    /// "SQTK7MP29WXTV3RHBD" — see PackSyncLogic). Normalized on BOTH read and
-    /// write so every path, including values restored from a prefs backup or
-    /// written via `defaults`, stays canonical. Empty = no sync.
-    static var packCode: String {
-        get { PackSyncLogic.normalizedPackCode(d.string(forKey: "packCode") ?? "") }
-        set { d.set(PackSyncLogic.normalizedPackCode(newValue), forKey: "packCode") }
+    // MARK: - Social Packs v2
+
+    /// The active Pack is not a credential; authorization remains bound to the
+    /// Keychain-backed Supabase session and server-side membership.
+    static var activeSocialPackId: UUID? {
+        get {
+            guard let raw = d.string(forKey: "activeSocialPackId") else { return nil }
+            return UUID(uuidString: raw)
+        }
+        set { d.set(newValue?.uuidString.lowercased(), forKey: "activeSocialPackId") }
     }
-    /// Stable per-install identity, minted on first use — display names can
-    /// change or collide; this can't.
-    static var packMemberId: String {
-        if let existing = d.string(forKey: "packMemberId") { return existing }
-        let fresh = UUID().uuidString.lowercased()
-        d.set(fresh, forKey: "packMemberId")
-        return fresh
+
+    static var socialDisplayName: String {
+        get { d.string(forKey: "socialDisplayName") ?? "" }
+        set {
+            d.set(
+                String(newValue.trimmingCharacters(in: .whitespacesAndNewlines).prefix(40)),
+                forKey: "socialDisplayName"
+            )
+        }
     }
-    /// Backend overrides for self-hosters (README); empty = the shipped project.
-    static var packBackendURL: String {
-        let s = d.string(forKey: "packBackendURL") ?? ""
-        return s.isEmpty ? PackSyncLogic.defaultBaseURL : s
+
+    static var packNotificationShowsNames: Bool {
+        get { d.bool(forKey: "packNotificationShowsNames") }
+        set { d.set(newValue, forKey: "packNotificationShowsNames") }
     }
-    static var packBackendKey: String {
-        let s = d.string(forKey: "packBackendKey") ?? ""
-        return s.isEmpty ? PackSyncLogic.defaultKey : s
+
+    static var acknowledgedSocialPackReset: Bool {
+        get { d.bool(forKey: "acknowledgedSocialPackReset") }
+        set { d.set(newValue, forKey: "acknowledgedSocialPackReset") }
     }
-    /// Last-seen today-counts per member (for friend-finished notifications).
-    static var packSnapshotDay: String {
-        get { d.string(forKey: "packSnapshotDay") ?? "" }
-        set { d.set(newValue, forKey: "packSnapshotDay") }
+
+    static var hasLegacyPackConfiguration: Bool {
+        d.bool(forKey: "packShareEnabled") ||
+            !(d.string(forKey: "packCode") ?? "").isEmpty ||
+            !(d.string(forKey: "packWebhookURL") ?? "").isEmpty
     }
-    static var packSnapshot: [String: Int] {
-        get { (d.dictionary(forKey: "packSnapshot") ?? [:]).compactMapValues { $0 as? Int } }
-        set { d.set(newValue, forKey: "packSnapshot") }
+
+    static func clearLegacyPackConfiguration() {
+        for key in [
+            "packShareEnabled",
+            "packCode",
+            "packWebhookURL",
+            "packDisplayName",
+            "packSnapshot",
+            "packSnapshotDay",
+            "packMemberId",
+            "lastDigestDay",
+        ] {
+            d.removeObject(forKey: key)
+        }
     }
 }

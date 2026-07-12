@@ -6,10 +6,40 @@ on:
 
 jobs:
   build-and-test:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
-      - name: Run SquatCounter tests
+      - name: Run logic regressions
         run: ./build.sh --test
+      - name: Compile Swift package
+        run: swift build --only-use-versions-from-resolved-file
       - name: Release build (universal .app)
+        env:
+          SQUAT_COACH_APP: ${{ runner.temp }}/Squat Coach.app
         run: ./build.sh
+      - name: Validate app bundle
+        env:
+          APP: ${{ runner.temp }}/Squat Coach.app
+        run: |
+          plutil -lint "$APP/Contents/Info.plist"
+          codesign --verify --deep --strict "$APP"
+          test "$(lipo -archs "$APP/Contents/MacOS/SquatCoach")" = "x86_64 arm64" ||
+            test "$(lipo -archs "$APP/Contents/MacOS/SquatCoach")" = "arm64 x86_64"
+
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: Start and reset local Supabase
+        run: |
+          supabase start
+          supabase db reset --local --no-seed --yes
+      - name: Run RLS and lifecycle tests
+        run: supabase test db --local supabase/tests/social_packs.sql
+      - name: Run anonymous Pack E2E
+        env:
+          SUPABASE_BIN: supabase
+        run: ./supabase/tests/e2e.sh

@@ -6,43 +6,58 @@ import ServiceManagement
 
 let repoURL = "https://github.com/brianyoungilcho/squat-coach"
 
+private enum ReminderNotification {
+    static let category = "SQUAT_REMINDER"
+    static let start = "START_WORKOUT"
+    static let snooze = "SNOOZE_WORKOUT"
+    static let skip = "SKIP_WORKOUT"
+}
+
+private enum PackNotification {
+    static let category = "PACK_ACTIVITY"
+    static let cheer = "CHEER_PACK_EVENT"
+    static let open = "OPEN_PACK"
+}
+
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private let scheduler = Scheduler()
     private let workout = WorkoutController()
+    private let packWindowController = PackWindowController()
     private var usr1Source: DispatchSourceSignal?
     private var usr2Source: DispatchSourceSignal?
     private var settingsWindow: NSWindow?
+    private var onboardingWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ note: Notification) {
         Prefs.registerDefaults()
         setupMainMenu()
         setupStatusItem()
-        registerLoginItemOnce()
-        // Ask for camera up front (once), while no floating window can cover the
-        // system permission dialog. By the first hourly reminder it's already set.
-        if AVCaptureDevice.authorizationStatus(for: .video) == .notDetermined {
-            AVCaptureDevice.requestAccess(for: .video) { _ in }
-        }
         UNUserNotificationCenter.current().delegate = self
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
-        workout.onFinished = { [weak self] _ in self?.refreshStatusTooltip() }
+        registerNotificationActions()
+        workout.onFinished = { [weak self] _ in
+            self?.refreshStatusTooltip()
+        }
+        workout.onVisibilityChange = { [weak self] in self?.updateActivationPolicy() }
         scheduler.onFire = { [weak self] in
-            PackShare.postDigestIfNeeded()
-            PackSync.shared.refresh()
             self?.fireReminder()
         }
         scheduler.start()
-        PackShare.postDigestIfNeeded()   // catch up if we launched after 06:00
-        PackSync.shared.refresh()
+        PackStore.shared.bootstrap()
+        packWindowController.onVisibilityChange = { [weak self] in
+            self?.updateActivationPolicy()
+        }
         refreshStatusTooltip()   // now that nextFire is known
+        if !Prefs.onboardingCompleted {
+            presentOnboarding()
+        }
 
         // `kill -USR1 <pid>` triggers a reminder immediately — handy for a
         // "remind me now" script and for driving the app during testing.
         signal(SIGUSR1, SIG_IGN)
         let src = DispatchSource.makeSignalSource(signal: SIGUSR1, queue: .main)
-        src.setEventHandler { [weak self] in MainActor.assumeIsolated { self?.fireReminder() } }
+        src.setEventHandler { [weak self] in MainActor.assumeIsolated { self?.workout.present() } }
         src.resume()
         usr1Source = src
 
@@ -133,32 +148,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         streak.isEnabled = false
         menu.addItem(streak)
 
-        if PackSync.shared.isActive {
-            // Kick a background refresh; this menu shows the cached state and
-            // the next open shows anything fresher.
-            PackSync.shared.refresh()
+        if let snapshot = PackStore.shared.snapshot {
+            PackStore.shared.refresh()
             menu.addItem(.separator())
-            let header = NSMenuItem(title: "🤝 Your pack · \(PackSyncLogic.displayPackCode(Prefs.packCode))",
-                                    action: nil, keyEquivalent: "")
-            header.isEnabled = false
+            let header = NSMenuItem(
+                title: "Your Pack · \(snapshot.pack.name)",
+                action: #selector(openPack),
+                keyEquivalent: "p"
+            )
+            header.target = self
+            header.image = NSImage(
+                systemSymbolName: "person.3",
+                accessibilityDescription: "Open Pack"
+            )
             menu.addItem(header)
-            let summaries = PackSync.shared.summaries
-            if summaries.isEmpty {
-                let empty = NSMenuItem(title: "No pack activity yet — finish a set!",
-                                       action: nil, keyEquivalent: "")
-                empty.isEnabled = false
-                menu.addItem(empty)
+
+            let eventsToday = snapshot.activities.filter {
+                Calendar.current.isDateInToday($0.event.occurredAt)
             }
-            for member in summaries.prefix(8) {
-                let row = NSMenuItem(title: PackSyncLogic.menuLine(member, selfId: Prefs.packMemberId),
-                                     action: nil, keyEquivalent: "")
-                row.isEnabled = false
-                menu.addItem(row)
-            }
-        } else if Prefs.packShareEnabled {
-            let pack = NSMenuItem(title: "🤝 Pack · sharing as \(Prefs.packResolvedName)",
-                                  action: nil, keyEquivalent: "")
-            pack.isEnabled = false
+            let activeMembers = Set(eventsToday.map(\.event.userId)).count
+            let summary = NSMenuItem(
+                title: "\(activeMembers) active today · \(eventsToday.count) finished sets",
+                action: nil,
+                keyEquivalent: ""
+            )
+            summary.isEnabled = false
+            menu.addItem(summary)
+        } else {
+            menu.addItem(.separator())
+            let pack = NSMenuItem(
+                title: "Set up a Pack…",
+                action: #selector(openPack),
+                keyEquivalent: "p"
+            )
+            pack.target = self
+            pack.image = NSImage(
+                systemSymbolName: "person.3",
+                accessibilityDescription: "Set up a Pack"
+            )
             menu.addItem(pack)
         }
         menu.addItem(.separator())
@@ -180,8 +207,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Actions
 
-    @objc private func startNow() { fireReminder() }
+    @objc private func startNow() { workout.present() }
     @objc private func openSettings() { presentSettings() }
+    @objc private func openPack() { packWindowController.present() }
 
     @objc private func about() {
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
@@ -189,11 +217,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let a = NSAlert()
             a.messageText = "Squat Coach"
             a.informativeText = "Version \(version)\n\n"
-                + "Every \(Prefs.intervalMinutes) minutes, do \(Prefs.targetReps) squats. Your camera counts "
-                + "them on-device with Apple Vision — video is never recorded and never leaves this Mac. "
-                + "Pack sharing (optional, off by default) posts only your name, set counts, and streak "
-                + "to your pack's Slack channel.\n\n"
-                + "🔥 \(Prefs.currentStreak)-day streak · \(Prefs.setsToday) set(s) today."
+                + "Every \(Prefs.intervalMinutes) minutes, Squat Coach offers a movement reminder. "
+                + "Your camera counts reps on-device with Apple Vision; video is never recorded or uploaded. "
+                + "Optional Packs share only your chosen name, finished-set totals, and streak with verified members.\n\n"
+                + "\(Prefs.currentStreak)-day streak · \(Prefs.setsToday) set(s) today."
             a.addButton(withTitle: "OK")
             a.addButton(withTitle: "View on GitHub")
             if a.runModal() == .alertSecondButtonReturn, let u = URL(string: repoURL) {
@@ -212,7 +239,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let view = SettingsView(
             onIntervalChange: { [weak self] in self?.scheduler.reschedule() },
-            onCheckUpdates: { [weak self] in self?.checkForUpdates() })
+            onCheckUpdates: { [weak self] in self?.checkForUpdates() },
+            onOpenPack: { [weak self] in self?.packWindowController.present() })
         let win = NSWindow(contentViewController: NSHostingController(rootView: view))
         win.title = "Squat Coach Settings"
         win.styleMask = [.titled, .closable]
@@ -223,8 +251,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                                object: win, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.settingsWindow = nil
-                NSApp.setActivationPolicy(.accessory)
                 self?.refreshStatusTooltip()
+                self?.updateActivationPolicy()
             }
         }
         NSApp.setActivationPolicy(.regular); NSApp.activate(ignoringOtherApps: true)
@@ -250,13 +278,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func presentUpdateAlert(_ release: UpdaterLogic.Release?) {
         let current = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
-        var install = false
         withRegularActivation {
             let alert = NSAlert()
             guard let release else {
                 alert.messageText = "Couldn't check for updates"
                 alert.informativeText = "GitHub wasn't reachable. Try again later."
                 alert.runModal()
+                updateInFlight = false
                 return
             }
             guard UpdaterLogic.isNewer(latest: release.version, current: current) else {
@@ -264,52 +292,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 alert.informativeText = "Squat Coach v\(current) is the latest release."
                 alert.addButton(withTitle: "OK")
                 alert.runModal()
+                updateInFlight = false
                 return
             }
             alert.messageText = "Update available: v\(release.version)"
-            alert.informativeText = "You have v\(current). Squat Coach can download v\(release.version), "
-                + "install it, and relaunch itself."
-            alert.addButton(withTitle: "Install and Relaunch")
+            alert.informativeText = "You have v\(current). Open the signed release page to review and install the update."
             alert.addButton(withTitle: "View on GitHub")
             alert.addButton(withTitle: "Later")
-            switch alert.runModal() {
-            case .alertFirstButtonReturn: install = true
-            case .alertSecondButtonReturn:
+            if alert.runModal() == .alertFirstButtonReturn {
                 if let u = URL(string: release.pageURL) { NSWorkspace.shared.open(u) }
-            default: break
             }
-        }
-        if install, let release { startInstall(release) } else { updateInFlight = false }
-    }
-
-    private func startInstall(_ release: UpdaterLogic.Release) {
-        guard let zip = URL(string: release.zipURL), UpdaterLogic.isTrustedDownloadURL(zip) else {
             updateInFlight = false
-            return
-        }
-        statusItem?.button?.toolTip = "Squat Coach — downloading v\(release.version)…"
-        Updater.install(zipURL: zip, expectedVersion: release.version,
-                        appPath: Bundle.main.bundlePath) { [weak self] error in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                guard let error else {
-                    Updater.relaunch(appPath: Bundle.main.bundlePath)
-                    return
-                }
-                self.updateInFlight = false
-                self.refreshStatusTooltip()
-                self.withRegularActivation {
-                    let a = NSAlert()
-                    a.messageText = "Update failed"
-                    a.informativeText = error.localizedDescription
-                        + " You can update manually from the releases page."
-                    a.addButton(withTitle: "OK")                 // default = safe dismiss
-                    a.addButton(withTitle: "Open Releases")
-                    if a.runModal() == .alertSecondButtonReturn, let u = URL(string: release.pageURL) {
-                        NSWorkspace.shared.open(u)
-                    }
-                }
-            }
         }
     }
 
@@ -320,34 +313,124 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         body()
-        if settingsWindow == nil { NSApp.setActivationPolicy(.accessory) }
+        updateActivationPolicy()
     }
 
     // MARK: - Reminder
 
     private func fireReminder() {
+        guard Prefs.remindersEnabled else { return }
         postBanner()
-        workout.present()
     }
 
-    private func postBanner() {
+    private func postBanner(after delay: TimeInterval? = nil) {
         let content = UNMutableNotificationContent()
-        content.title = "Squat time 🏋️"
-        content.body = "Do \(Prefs.targetReps) squats — your camera will count them."
+        content.title = "Time for a movement break"
+        content.body = "Ready for \(Prefs.targetReps) squats?"
         content.sound = Prefs.soundEnabled ? .default : nil
+        content.categoryIdentifier = ReminderNotification.category
+        let trigger = delay.map {
+            UNTimeIntervalNotificationTrigger(timeInterval: max(1, $0), repeats: false)
+        }
         UNUserNotificationCenter.current().add(
-            UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
+            UNNotificationRequest(
+                identifier: UUID().uuidString,
+                content: content,
+                trigger: trigger
+            )
+        )
     }
 
-    // MARK: - Login item
+    private func registerNotificationActions() {
+        let start = UNNotificationAction(
+            identifier: ReminderNotification.start,
+            title: "Start",
+            options: [.foreground]
+        )
+        let snooze = UNNotificationAction(
+            identifier: ReminderNotification.snooze,
+            title: "Snooze 15 min"
+        )
+        let skip = UNNotificationAction(
+            identifier: ReminderNotification.skip,
+            title: "Skip"
+        )
+        let category = UNNotificationCategory(
+            identifier: ReminderNotification.category,
+            actions: [start, snooze, skip],
+            intentIdentifiers: []
+        )
+        let cheer = UNNotificationAction(
+            identifier: PackNotification.cheer,
+            title: "Cheer"
+        )
+        let openPack = UNNotificationAction(
+            identifier: PackNotification.open,
+            title: "Open Pack",
+            options: [.foreground]
+        )
+        let packCategory = UNNotificationCategory(
+            identifier: PackNotification.category,
+            actions: [cheer, openPack],
+            intentIdentifiers: []
+        )
+        UNUserNotificationCenter.current().setNotificationCategories([
+            category,
+            packCategory,
+        ])
+    }
 
-    private func registerLoginItemOnce() {
-        let flag = "didAutoRegisterLoginItem"
-        guard !UserDefaults.standard.bool(forKey: flag) else { return }
-        do {
-            if SMAppService.mainApp.status != .enabled { try SMAppService.mainApp.register() }
-            UserDefaults.standard.set(true, forKey: flag)
-        } catch { /* non-fatal: app still runs, just won't auto-start */ }
+    // MARK: - Onboarding and activation
+
+    private func presentOnboarding() {
+        guard onboardingWindow == nil else { return }
+        let view = OnboardingView { [weak self] enableNotifications in
+            guard let self else { return }
+            if enableNotifications {
+                UNUserNotificationCenter.current().requestAuthorization(
+                    options: [.alert, .sound]
+                ) { _, _ in }
+            }
+            self.scheduler.reschedule()
+            self.onboardingWindow?.close()
+        }
+        let window = NSWindow(
+            contentViewController: NSHostingController(rootView: view)
+        )
+        window.title = "Welcome to Squat Coach"
+        window.styleMask = [.titled, .closable]
+        window.isReleasedWhenClosed = false
+        window.center()
+        onboardingWindow = window
+        NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification,
+            object: window,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.onboardingWindow = nil
+                self?.updateActivationPolicy()
+            }
+        }
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+    }
+
+    private func updateActivationPolicy() {
+        let hasVisibleWindow =
+            settingsWindow?.isVisible == true ||
+            onboardingWindow?.isVisible == true ||
+            packWindowController.isVisible ||
+            workout.isVisible
+        NSApp.setActivationPolicy(hasVisibleWindow ? .regular : .accessory)
+    }
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        guard let inviteURL = urls.first,
+              let token = PackStore.shared.handle(url: inviteURL)
+        else { return }
+        packWindowController.present(invite: token)
     }
 
     private func setupMainMenu() {
@@ -368,6 +451,45 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
                                             willPresent notification: UNNotification,
                                             withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
         completionHandler([.banner, .sound])
+    }
+
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        let actionIdentifier = response.actionIdentifier
+        let categoryIdentifier = response.notification.request.content.categoryIdentifier
+        let eventId = (response.notification.request.content.userInfo["event_id"] as? NSNumber)?
+            .int64Value
+        completionHandler()
+        Task { @MainActor [weak self] in
+            switch actionIdentifier {
+            case ReminderNotification.start:
+                self?.workout.present()
+            case UNNotificationDefaultActionIdentifier:
+                if categoryIdentifier == PackNotification.category {
+                    self?.packWindowController.present()
+                } else {
+                    self?.workout.present()
+                }
+            case ReminderNotification.snooze:
+                self?.postBanner(after: 15 * 60)
+            case ReminderNotification.skip, UNNotificationDismissActionIdentifier:
+                break
+            case PackNotification.cheer:
+                guard let eventId,
+                      let activity = PackStore.shared.snapshot?.activities.first(
+                          where: { $0.id == eventId }
+                      )
+                else { return }
+                await PackStore.shared.toggleReaction(kind: .cheer, activity: activity)
+            case PackNotification.open:
+                self?.packWindowController.present()
+            default:
+                break
+            }
+        }
     }
 }
 
