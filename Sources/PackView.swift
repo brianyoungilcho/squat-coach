@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct PackView: View {
@@ -9,6 +10,7 @@ struct PackView: View {
     @State private var displayName = Prefs.socialDisplayName
     @State private var showingCreate = false
     @State private var confirmation: PackConfirmation?
+    @State private var copiedInviteURL: URL?
 
     init(store: PackStore, initialInvite: String? = nil) {
         self.store = store
@@ -285,6 +287,15 @@ struct PackView: View {
                     ShareLink(item: url) {
                         Label("Share invite", systemImage: "square.and.arrow.up")
                     }
+                    Button {
+                        copyInvite(url)
+                    } label: {
+                        Label(
+                            copiedInviteURL == url ? "Copied" : "Copy link",
+                            systemImage: copiedInviteURL == url ? "checkmark" : "doc.on.doc"
+                        )
+                    }
+                    .help(copiedInviteURL == url ? "Invite link copied" : "Copy invite link")
                 } else {
                     Button {
                         Task { await store.rotateInvite() }
@@ -324,6 +335,13 @@ struct PackView: View {
 
     private func join() {
         Task { await store.joinPack(inviteValue: inviteValue, displayName: displayName) }
+    }
+
+    private func copyInvite(_ url: URL) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(url.absoluteString, forType: .string)
+        copiedInviteURL = url
     }
 
     private func clean(_ value: String) -> String {
